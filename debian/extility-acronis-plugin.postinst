@@ -1,0 +1,8 @@
+#!/bin/sh
+
+mkdir -p /var/spool/extility/jade
+echo "reload-fdl" >> /var/spool/extility/jade/service-interface-queue
+
+#DEBHELPER#
+
+exit 0

@@ -1,0 +1,13 @@
+Source: extility-acronis-plugin
+Section: unknown
+Priority: extra
+Maintainer: Alex Bligh <alex@flexiant.com>
+Build-Depends: debhelper (>= 7)
+Standards-Version: 3.8.3
+Homepage: http://www.flexiant.com/
+
+Package: extility-acronis-plugin
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Extility Acronis Plugin
+ This package provides the Acronis plugins for FCO
