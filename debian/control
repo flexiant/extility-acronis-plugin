@@ -8,6 +8,6 @@ Homepage: http://www.flexiant.com/
 
 Package: extility-acronis-plugin
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: ${misc:Depends}
 Description: Extility Acronis Plugin
  This package provides the Acronis plugins for FCO

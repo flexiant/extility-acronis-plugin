@@ -1,11 +1,11 @@
 DEB_EXTILITY_VERSION ?= 0.0.0-devtree
 CURRENT_VERSION := $(DEB_EXTILITY_VERSION)
-JADE_INIT:=debian/opt/extility/jade-init
+EXTERNAL_FDL:=debian/opt/extility/jade-init/external-fdl
 
 all:
-	/bin/mkdir -p ${JADE_INIT}  2>/dev/null && \
-	/bin/cp -a provider/fco-acronis-plugin.lua ${JADE_INIT} 2>/dev/null && \
-	/bin/cp -a translations ${JADE_INIT} 2>/dev/null && \
+	/bin/mkdir -p ${EXTERNAL_FDL}  2>/dev/null && \
+	/bin/cp -a provider/fco-acronis-plugin.lua ${EXTERNAL_FDL} 2>/dev/null && \
+	/bin/cp -a translations ${EXTERNAL_FDL} 2>/dev/null && \
 	/bin/true 
 	
 clean:
