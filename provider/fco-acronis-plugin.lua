@@ -295,8 +295,8 @@ function server_measurement_function(p)
 
   local acronisUsage=0;
   local server=p.resource;
+  
   local serverValues=getServerValues(server);
-
   local billingEntityValues=getBillingEntityValues(server:getBillingEntityUUID());
 
   local json=new("JSON");
@@ -326,6 +326,9 @@ function server_measurement_function(p)
 
   if(serverValues.enabled) then
     -- Backup is enabled
+    
+    local customerValues=getCustomerValues(server:getCustomerUUID());
+    
     if(backupPlanID == nil) then
       -- Does not have backup plan
 
@@ -337,16 +340,16 @@ function server_measurement_function(p)
       end
 
       if(machine.lastBackup ~= nil) then
-        acronisUsage=getAcronisStorageUsage(connection, loginResult.url);
+        acronisUsage=getAcronisStorageUsage(connection, loginResult.url, customerValues.acronisID);
         if(acronisUsage > 0) then
-          print("ACRONIS_BACKUP NOTICE", "Acronis storage usage is: "..acronisUsage.." B for server "..serverValues.ipAddress.."");
+          print("ACRONIS_BACKUP NOTICE", "Acronis storage usage is: "..acronisUsage.." GB for server "..serverValues.ipAddress.."");
         end
       end
     else
       -- Has existing backup plan
-      acronisUsage=getAcronisStorageUsage(connection, loginResult.url);
+      acronisUsage=getAcronisStorageUsage(connection, loginResult.url, customerValues.acronisID);
       if(acronisUsage > 0) then
-        print("ACRONIS_BACKUP NOTICE", "Acronis storage usage is: "..acronisUsage.." B for server "..serverValues.ipAddress.."");
+        print("ACRONIS_BACKUP NOTICE", "Acronis storage usage is: "..acronisUsage.." GB for server "..serverValues.ipAddress.."");
       end
     end
   elseif(backupPlanID ~= nil) then
@@ -495,24 +498,26 @@ function pre_server_metadata_update_trigger(p)
       version=1,
     }
   end
-
-  local server=p.input[1];
+  
+  local server = p.input[1];
+  local document = p.input[2];
 
   local customerValues=getCustomerValues(server:getCustomerUUID());
   local billingEntityValues=getBillingEntityValues(server:getBillingEntityUUID());
 
   if(customerValues.success) then
     local xmlHelper=new("FDLXMLHelper");
-    local runtimeNode=xmlHelper:findNode(p.input[2], "CONFIG/meta/server/system");
+    local runtimeNode=xmlHelper:findNode(document, "CONFIG/meta/server/system");
 
-    xmlHelper:addTextNode(p.input[2], runtimeNode, "acronis_url", billingEntityValues.serviceURL);
-    xmlHelper:addTextNode(p.input[2], runtimeNode, "acronis_username", customerValues.acronisUsername);
-    xmlHelper:addTextNode(p.input[2], runtimeNode, "acronis_password", customerValues.acronisPassword);
+    local acronisNode = xmlHelper:addNode(document, runtimeNode, "fco-acronis");
+
+    xmlHelper:addTextNode(document, acronisNode, "url", billingEntityValues.serviceURL);
+    xmlHelper:addTextNode(document, acronisNode, "username", customerValues.acronisUsername);
+    xmlHelper:addTextNode(document, acronisNode, "password", customerValues.acronisPassword);
 
     return { exitState="SUCCESS" }
   end
 
-  print("pre_server_metadata_update_trigger", "CONTINUE");
   return { exitState="CONTINUE" }
 end
 
@@ -531,6 +536,9 @@ function post_server_state_change_trigger(p)
 
   local serverValues=getServerValues(p.input);
   local billingEntityValues=getBillingEntityValues(p.input:getBillingEntityUUID());
+
+  -- Server is deleted, doesn't need the private data map
+  dataStore:resetPrivateDataMap(serverValues.uuid, nil);
 
   local simplehttp=new("simplehttp");
   local json=new("JSON")
@@ -555,15 +563,14 @@ function post_server_state_change_trigger(p)
   end
 
   local backupPlanID=getBackupPlanID(connection, backupAccess.url, backupAccess.hostName, machine.id);
-  if(backupPlanID == nil) then
-    logout(connection, loginResult.url);
-    return { exitState="CONTINUE" }
+  if(backupPlanID ~= nil) then
+     deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, backupPlanID);
+     print("ACRONIS_BACKUP NOTICE", "Backup Plan " ..backupPlanID.." has been deleted");
   end
 
-  deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, backupPlanID);
-  print("ACRONIS_BACKUP NOTICE", "Backup Plan " ..backupPlanID.." has been deleted");
+  deleteMachine(connection, backupAccess.url, backupAccess.hostName, machine.id);
+  print("ACRONIS_BACKUP NOTICE", "Machine " ..serverValues.ipAddress.." has been removed");
 
-  dataStore:resetPrivateDataMap(serverValues.uuid, nil);
   logout(connection, loginResult.url);
 
   return { exitState="SUCCESS" }
@@ -717,7 +724,11 @@ end
 --[[ End of Action Functions ]]
 --[[ Helper functions ]]
 
-function makeAPICall(connection, url, method, params, headers)
+function makeAPICall(connection, url, method, params, headers, debug)
+
+  if(debug == nil) then
+    debug = false;
+  end
 
   local success=false;
   local statusCode="";
@@ -729,7 +740,9 @@ function makeAPICall(connection, url, method, params, headers)
     connection:setRequestHeaders(headers);
   end
 
-  print("makeAPICall input", method, url, params);
+  if(debug) then
+    print("makeAPICall input", method, url, params);
+  end
 
   local apiFunction=function(value) response=response .. tostring(value); return true; end
 
@@ -767,12 +780,14 @@ function makeAPICall(connection, url, method, params, headers)
     end
   end
 
-  if(statusCode ~= nil and tonumber(statusCode) >= 300) then
+  if(statusCode ~= nil and (tonumber(statusCode) >= 300 or tonumber(statusCode) < 200)) then
     success=false;
-    response=clearHTMLTags(response);
+    response=cleanErrorResponse(response);
   end
 
-  print("makeAPICall result", success, statusCode, response);
+  if(debug) then
+    print("makeAPICall result", success, statusCode, response);
+  end
 
   return{
     success=success,
@@ -925,7 +940,8 @@ function getCustomerValues(customerUUID)
     end
   end
 
-  local acronisUsername = customer:getBillingEntityUUID().."."..customerUUID.."@acronis.flexiant.com";
+  local acronisUsername = customer:getBillingEntityUUID().."."..customerUUID;
+  local acronisEmail = customer:getBillingEntityUUID().."."..customerUUID.."@acronis.flexiant.com";
   local acronisPassword = getRandomString(8);
   local acronisIDString="";
 
@@ -957,6 +973,7 @@ function getCustomerValues(customerUUID)
     address6=address6,
     acronisUsername=acronisUsername,
     acronisPassword=acronisPassword,
+    acronisEmail=acronisEmail,
     acronisID=acronisIDString,
     firstname=firstnameString,
     lastname=lastnameString,
@@ -1038,7 +1055,7 @@ function createUserAccount(connection, acronisURL, customerData, password, group
     zipcode=customerData.address5,
     country=customerData.address6,
     login=customerData.acronisUsername,
-    email=customerData.acronisUsername,
+    email=customerData.acronisEmail,
     firstname=customerData.firstname,
     lastname=customerData.lastname,
     phone=customerData.phone,
@@ -1060,7 +1077,7 @@ function createUserAccount(connection, acronisURL, customerData, password, group
   local apiResult=makeAPICall(connection, acronisURL.."/api/1/groups/"..groupID.."/users/", "POST", userData, headers);
   if(apiResult.success == false) then
     if(apiResult.statusCode == 409) then
-      -- Account already exists, we catch this error and return false.
+      -- Account already exists, return false.
       return false;
     end
 
@@ -1083,7 +1100,7 @@ function createUserAccount(connection, acronisURL, customerData, password, group
     providerValues:put("acronisID", tostring(userAccount.id));
     adminAPI:updateConfigurationProviderValues(customerData.uuid, "ACRONIS_BACKUP", providerValues);
 
-    apiResult=makeAPICall(connection, acronisURL.."/api/1/actions/mail/activate/?email="..customerData.acronisUsername, "GET", "", headers);
+    apiResult=makeAPICall(connection, acronisURL.."/api/1/actions/mail/activate/?email="..customerData.acronisEmail.."&login="..customerData.acronisUsername, "GET", "", headers);
     if(apiResult.success == false) then
       print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
       return nil, apiResult;
@@ -1123,7 +1140,7 @@ function deleteUserAccount(connection, acronisURL, groupID, accountID)
   
   local accountVersion = user.version;
 
-  local apiResult=makeAPICall(connection, acronisURL.."/api/1/groups/"..groupID.."/users/"..accountID.."?version="..accountVersion, "PUT", json:encode({status=0}), headers);
+  local apiResult=makeAPICall(connection, acronisURL.."/api/1/groups/"..groupID.."/users/"..accountID.."?version="..accountVersion, "PUT", json:encode({status=0}), headers, true);
   if(apiResult.success == false) then
     print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
     return nil, apiResult;
@@ -1132,7 +1149,7 @@ function deleteUserAccount(connection, acronisURL, groupID, accountID)
   local result = json:decode(apiResult.response);
   accountVersion = result.version;
 
-  apiResult=makeAPICall(connection, acronisURL.."/api/1/groups/"..groupID.."/users/"..accountID.."?version="..accountVersion, "DELETE", "", headers);
+  apiResult=makeAPICall(connection, acronisURL.."/api/1/groups/"..groupID.."/users/"..accountID.."?version="..accountVersion, "DELETE", "", headers, true);
   if(apiResult.success == false) then
     print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
     return nil, apiResult;
@@ -1246,6 +1263,27 @@ function getMachine(connection, acronisURL, hostName, ipAddress)
   return nil
 end
 
+function deleteMachine(connection, acronisURL, hostName, ipAddress)
+
+  if(acronisURL == nil or hostName == nil or ipAddress == nil) then
+    return nil;
+  end
+
+  local json=new("JSON");
+
+  local headers={};
+  headers['Content-Type']="application/json; charset=UTF-8";
+  headers['Accept']="application/json";
+
+  local apiResult=makeAPICall(connection, acronisURL.."/api/ams/"..hostName.."/machines/"..ipAddress, "DELETE", "", headers, true);
+  if(apiResult.success == false) then
+    print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
+    return nil, apiResult;
+  end
+
+  return true;
+end
+
 function getBackupPlanID(connection, acronisURL, hostName, machineID)
 
   local json=new("JSON")
@@ -1279,6 +1317,8 @@ function getBackupPlanID(connection, acronisURL, hostName, machineID)
       end
     end
   end
+  
+  return nil;
 end
 
 function createBackupPlan(connection, acronisURL, hostName, planName, machineID, backupRetention, backupFrequency, backupPassword)
@@ -1301,7 +1341,7 @@ function createBackupPlan(connection, acronisURL, hostName, planName, machineID,
   end
 
   local apiParams={
-    action= "create",
+    action= "createAndRun",
     data= {
       name= planName,
       scheme= {
@@ -1445,8 +1485,7 @@ function createBackupPlan(connection, acronisURL, hostName, planName, machineID,
   headers['Content-Type']="application/json; charset=UTF-8";
   headers['Accept']="application/json";
 
-  -- TODO : can't confirm input as docs are incomplete
-  local apiResult=makeAPICall(connection, acronisURL.."/api/ams/"..hostName.."/bplans", "POST", json:encode(apiParams), headers);
+  local apiResult=makeAPICall(connection, acronisURL.."/api/ams/"..hostName.."/bplans", "POST", json:encode(apiParams), headers, true);
   if(apiResult.success == false) then
     print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
     return nil, apiResult;
@@ -1456,9 +1495,12 @@ end
 
 function deleteBackupPlan(connection, acronisURL, hostName, backupPlanID)
 
-  local json=new("JSON")
+  local json=new("JSON");
+  local headers={};
+  headers['Content-Type']="application/json; charset=UTF-8";
+  headers['Accept']="application/json";
 
-  local apiResult=makeAPICall(connection, acronisURL.."/api/ams/"..hostName.."/bplans/"..backupPlanID, "DELETE", "", nil);
+  local apiResult=makeAPICall(connection, acronisURL.."/api/ams/"..hostName.."/bplans/"..backupPlanID, "DELETE", "", headers, true);
   if(apiResult.success == false) then
     print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
     return nil, apiResult;
@@ -1467,10 +1509,10 @@ function deleteBackupPlan(connection, acronisURL, hostName, backupPlanID)
   return json:decode(apiResult.response);
 end
 
-function getAcronisStorageUsage(connection, acronisURL)
+function getAcronisStorageUsage(connection, acronisURL, userID)
   local json=new("JSON")
 
-  local apiResult=makeAPICall(connection, acronisURL.."/users/self", "GET", "", nil);
+  local apiResult=makeAPICall(connection, acronisURL.."/api/1/users/"..userID, "GET", "", nil);
   if(apiResult.success == false) then
     print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
     return 0;
@@ -1484,7 +1526,7 @@ function getAcronisStorageUsage(connection, acronisURL)
   return (tonumber(userProfile.usage.storage_size) / 1073741824);
 end
 
-function clearHTMLTags(input)
+function cleanErrorResponse(input)
 
   local output=input:gsub("<a.->(.-)</a>","%1");
 
@@ -1496,6 +1538,17 @@ function clearHTMLTags(input)
   output=output:gsub("<hr.->(.-)</hr>","%1");
   output=output:gsub("<center.->(.-)</center>","%1");
 
+  local jsonOutput = nil;
+
+  if(pcall(function() jsonOutput = new("JSON"):decode(output); end)) then
+    if(jsonOutput ~= nil and type(jsonOutput) == "table") then
+      local message = jsonOutput.message;
+      if(message ~= nil) then
+        output = message;
+      end
+    end
+  end
+
   return output;
 end
 
@@ -1503,7 +1556,7 @@ function getRandomString(length)
 
   -- No capital i or o as could be mistaken for 1 and 0 with some fonts
   local randomString = "";
-  local pool = {"0","1","2","3","4","5","6","7","8","9","a","b","c","d","e","f","g", "h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","A","B","C","D","E","F","G","H","J","K","L","M","N","P","Q","R","S","T","U","V","W","X","Y","Z","-"}
+  local pool = {"0","1","2","3","4","5","6","7","8","9","a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z","A","B","C","D","E","F","G","H","J","K","L","M","N","P","Q","R","S","T","U","V","W","X","Y","Z","-"}
 
   for i=1, length do
     randomString = randomString..pool[math.random(1, #pool)]
