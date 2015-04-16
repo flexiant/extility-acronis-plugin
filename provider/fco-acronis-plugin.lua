@@ -116,7 +116,7 @@ function acronis_backup_provider()
                 key="login",
                 name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_NAME",
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_DESCRIPTION",
-                returnType="URL",
+                returnType="URL_POPUP",
                 executionFunction="action_function_sigin",
                 order=0
               }
@@ -180,7 +180,7 @@ function acronis_backup_provider()
                 key="login",
                 name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_NAME",
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_DESCRIPTION",
-                returnType="URL",
+                returnType="URL_POPUP",
                 executionFunction="action_function_sigin",
                 order=0
               },
@@ -295,7 +295,7 @@ function server_measurement_function(p)
 
   local acronisUsage=0;
   local server=p.resource;
-  
+
   local serverValues=getServerValues(server);
   local billingEntityValues=getBillingEntityValues(server:getBillingEntityUUID());
 
@@ -326,13 +326,13 @@ function server_measurement_function(p)
 
   if(serverValues.enabled) then
     -- Backup is enabled
-    
+
     local customerValues=getCustomerValues(server:getCustomerUUID());
-    
+
     if(backupPlanID == nil) then
       -- Does not have backup plan
 
-      local backupPlanID=createBackupPlan(connection, backupAccess.url, backupAccess.hostName, "Backup-"..server:getCustomerName(), machine.id, serverValues.retention, serverValues.frequency, serverValues.password);
+      local backupPlanID=createBackupPlan(connection, backupAccess.url, backupAccess.hostName, "Backup-"..server:getCustomerName().."-"..machine.id, machine.id, serverValues.retention, serverValues.frequency, serverValues.password);
       if(backupPlanID) then
         print("ACRONIS_BACKUP NOTICE", "Backup place created " ..backupPlanID);
       else
@@ -340,14 +340,14 @@ function server_measurement_function(p)
       end
 
       if(machine.lastBackup ~= nil) then
-        acronisUsage=getAcronisStorageUsage(connection, loginResult.url, customerValues.acronisID);
+        acronisUsage=getAcronisStorageUsage(connection, loginResult.url, customerValues.acronisID, machine.id);
         if(acronisUsage > 0) then
           print("ACRONIS_BACKUP NOTICE", "Acronis storage usage is: "..acronisUsage.." GB for server "..serverValues.ipAddress.."");
         end
       end
     else
       -- Has existing backup plan
-      acronisUsage=getAcronisStorageUsage(connection, loginResult.url, customerValues.acronisID);
+      acronisUsage=getAcronisStorageUsage(connection, loginResult.url, customerValues.acronisID, machine.id);
       if(acronisUsage > 0) then
         print("ACRONIS_BACKUP NOTICE", "Acronis storage usage is: "..acronisUsage.." GB for server "..serverValues.ipAddress.."");
       end
@@ -379,20 +379,53 @@ function post_job_state_change_trigger(p)
   end
   -- This will be called for every customer that belongs to a BE that has been setup to use the acronis plugin
 
-  if(p.input:getJobType():name() == "DELETE_RESOURCE" and p.input:getItemType():name() == "CUSTOMER") then
-    local adminAPI=new("AdminAPI", "current");
-    local customer=adminAPI:getResource(p.input:getItemUUID(), true);
+  if(p.input:getItemType():name() ~= "CUSTOMER") then
+    return { exitState="CONTINUE" }
+  end
 
-    local customerValues=getCustomerValues(customer:getResourceUUID());
-    
+  if(p.input:getJobType():name() == "CREATE_CUSTOMER") then
+    -- Create Acronis account for Customer as BE is setup to use Acronis plugin.
+    local customerValues=getCustomerValues(p.input:getItemUUID());
+
+    if(customerValues.success) then
+      local billingEntityValues=getBillingEntityValues(customerValues.beuuid);
+
+      local simplehttp=new("simplehttp");
+      local connection=simplehttp:newConnection({ enable_cookie=true, ssl_verify=true })
+
+      local loginResult=loginToAcronis(connection, billingEntityValues.serviceURL, billingEntityValues.username, billingEntityValues.password)
+      if(loginResult == nil or loginResult.url == nil) then
+        return { exitState="CONTINUE" }
+      end
+
+      local createUserAccount=createUserAccount(connection, loginResult.url, customerValues, billingEntityValues.password, billingEntityValues.groupID);
+      logout(connection, loginResult.url);
+
+      if(createUserAccount == nil) then
+        return { exitState="CONTINUE" }
+      end
+
+      if(createUserAccount) then
+        print("ACRONIS_BACKUP NOTICE", "New user account created on Acronis");
+      else
+        print("ACRONIS_BACKUP NOTICE", "User account exists on Acronis");
+      end
+
+      return { exitState="SUCCESS" }
+    end
+
+  elseif(p.input:getJobType():name() == "DELETE_RESOURCE") then
+
+    local customerValues=getCustomerValues(p.input:getItemUUID());
+
     -- Delete customer data from the datastore after getting customer values as the resource has been deleted anyway
-    dataStore:resetPrivateDataMap(customer:getResourceUUID(), nil);
-    
+    dataStore:resetPrivateDataMap(customerValues.uuid, nil);
+
     if(customerValues.acronisID == nil or #customerValues.acronisID == 0) then
       return { exitState="CONTINUE" }
     end
-    
-    local billingEntityValues=getBillingEntityValues(customer:getBillingEntityUUID());
+
+    local billingEntityValues=getBillingEntityValues(customerValues.beuuid);
 
     if(billingEntityValues.success) then
       local simplehttp=new("simplehttp");
@@ -405,12 +438,12 @@ function post_job_state_change_trigger(p)
 
       local success, apiResult = deleteUserAccount(connection, loginResult.url, billingEntityValues.groupID, customerValues.acronisID);
       logout(connection, loginResult.url);
-        
+
       if(success == nil) then
         print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
         return { returnCode="CONTINUE" }
       end
-      
+
       if(success) then
         print("ACRONIS_BACKUP NOTICE", "Acronis user account deleted");
         return { exitState="SUCCESS" }
@@ -448,8 +481,8 @@ function post_create_server_trigger(p)
   local serverValues=getServerValues(server);
   if(serverValues.enabled) then
 
-    local customerData=getCustomerValues(server:getCustomerUUID());
-    if(customerData.success) then
+    local customerValues=getCustomerValues(server:getCustomerUUID());
+    if(customerValues.success) then
 
       local simplehttp=new("simplehttp");
       local connection=simplehttp:newConnection({ enable_cookie=true, ssl_verify=true })
@@ -459,9 +492,9 @@ function post_create_server_trigger(p)
         return { exitState="CONTINUE" }
       end
 
-      local createUserAccount=createUserAccount(connection, loginResult.url, customerData, billingEntityValues.password, billingEntityValues.groupID);
+      local createUserAccount=createUserAccount(connection, loginResult.url, customerValues, billingEntityValues.password, billingEntityValues.groupID);
       logout(connection, loginResult.url);
-        
+
       if(createUserAccount == nil) then
         return { exitState="CONTINUE" }
       end
@@ -498,7 +531,7 @@ function pre_server_metadata_update_trigger(p)
       version=1,
     }
   end
-  
+
   local server = p.input[1];
   local document = p.input[2];
 
@@ -564,8 +597,8 @@ function post_server_state_change_trigger(p)
 
   local backupPlanID=getBackupPlanID(connection, backupAccess.url, backupAccess.hostName, machine.id);
   if(backupPlanID ~= nil) then
-     deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, backupPlanID);
-     print("ACRONIS_BACKUP NOTICE", "Backup Plan " ..backupPlanID.." has been deleted");
+    deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, backupPlanID);
+    print("ACRONIS_BACKUP NOTICE", "Backup Plan " ..backupPlanID.." has been deleted");
   end
 
   deleteMachine(connection, backupAccess.url, backupAccess.hostName, machine.id);
@@ -589,7 +622,7 @@ function action_function_setup_account(p)
 
   loginResult, apiResult=loginToAcronis(connection, p.parameters.serviceURL, p.parameters.username, p.parameters.password);
   logout(connection, loginResult.url);
-  
+
   if(loginResult == nil) then
     if(apiResult == nil) then
       return { returnCode="FAILED", errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_SETUP_ACCOUNT_FAILED", " ") }
@@ -628,7 +661,7 @@ function action_function_sigin(p)
   local customerValues=nil;
 
   if(p.resource:getResourceType():name() == "CUSTOMER") then
-    customerValues=getCustomerValues(p.resource:getResourceUUID());
+    customerValues=getCustomerValues(p.resource);
   else
     customerValues=getCustomerValues(p.resource:getCustomerUUID());
   end
@@ -647,7 +680,7 @@ function action_function_sigin(p)
       if(apiResult.response == nil or #apiResult.response == 0) then
         apiResult.response = translate.string("#__ACRONIS_BACKUP_MESSAGE_SSO_FAILED");
       end
-    
+
       return { returnCode="FAILED", errorCode=apiResult.statusCode, errorString=apiResult.response }
     end
   end
@@ -657,7 +690,7 @@ function action_function_sigin(p)
 
   backupConnectionDetails, apiResult=getBackupConnectionDetails(connection, loginResult.url, "self");
   logout(connection, loginResult.url);
-  
+
   if(backupConnectionDetails == nil) then
     if(apiResult == nil) then
       return { returnCode="FAILED", errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_SSO_FAILED") }
@@ -665,14 +698,14 @@ function action_function_sigin(p)
       if(apiResult.response == nil or #apiResult.response == 0) then
         apiResult.response = translate.string("#__ACRONIS_BACKUP_MESSAGE_SSO_FAILED");
       end
-    
+
       return { returnCode="FAILED", errorCode=apiResult.statusCode, errorString=apiResult.response }
     end
   end
 
   local utils=new("Utils");
 
-  return { returnCode="SUCCESSFUL", returnType="URL", returnContent=utils:createURLActionContent("GET", backupConnectionDetails.sso, nil) }
+  return { returnCode="SUCCESSFUL", returnType="URL_POPUP", returnContent=utils:createURLActionContent("GET", backupConnectionDetails.sso, nil) }
 end
 
 function action_function_register(p)
@@ -702,7 +735,7 @@ function action_function_register(p)
   backupAccess, apiResult=accessBackup(connection, loginResult.url, "self");
   if(backupAccess == nil) then
     logout(connection, loginResult.url);
-  
+
     if(apiResult == nil) then
       return { returnCode="FAILED", errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_REGISTER_FAILED") }
     else
@@ -712,9 +745,8 @@ function action_function_register(p)
 
   local machine=getMachine(connection, backupAccess.url, backupAccess.hostName, serverValues.ipAddress);
   logout(connection, loginResult.url);
-  
+
   if(machine == nil) then
-    --    return { returnCode="FAILED", errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_REGISTER_FAILED") }
     return { returnCode="SUCCESSFUL", returnType="STRING", returnContent=translate.string("#__ACRONIS_BACKUP_MESSAGE_REGISTER_FAILED") }
   end
 
@@ -782,6 +814,9 @@ function makeAPICall(connection, url, method, params, headers, debug)
 
   if(statusCode ~= nil and (tonumber(statusCode) >= 300 or tonumber(statusCode) < 200)) then
     success=false;
+    if(debug) then
+      print("makeAPICall pre-error cleanup", response, ".");
+    end
     response=cleanErrorResponse(response);
   end
 
@@ -876,14 +911,13 @@ end
 
 function getCustomerValues(customerUUID)
 
-  local adminAPI=new("AdminAPI", "current");
-
   local customer=nil;
 
   if(type(customerUUID) ~= "string") then
     customer=customerUUID;
     customerUUID=customerUUID:getResourceUUID()
   else
+    local adminAPI=new("AdminAPI", "current");
     customer=adminAPI:getResource(customerUUID, true);
   end
 
@@ -916,8 +950,8 @@ function getCustomerValues(customerUUID)
     address6="";
   end
 
-  local firstnameString="";
-  local lastnameString="";
+  local firstnameString=customer:getResourceName();
+  local lastnameString=customer:getBillingEntityName();
   local emailString="";
   local phoneString="";
 
@@ -940,9 +974,11 @@ function getCustomerValues(customerUUID)
     end
   end
 
-  local acronisUsername = customer:getBillingEntityUUID().."."..customerUUID;
-  local acronisEmail = customer:getBillingEntityUUID().."."..customerUUID.."@acronis.flexiant.com";
-  local acronisPassword = getRandomString(8);
+  local beUUID = customer:getBillingEntityUUID();
+
+  local acronisUsername = beUUID.."."..customerUUID;
+  local acronisEmail = beUUID.."."..customerUUID.."@acronis.flexiant.com";
+  local acronisPassword = getRandomString(16);
   local acronisIDString="";
 
   local customerData = dataStore:getPrivateDataMap(customerUUID);
@@ -965,6 +1001,7 @@ function getCustomerValues(customerUUID)
   return {
     success=true,
     uuid=customer:getResourceUUID(),
+    beuuid=beUUID,
     address1=address1,
     address2=address2,
     address3=address3,
@@ -979,7 +1016,7 @@ function getCustomerValues(customerUUID)
     lastname=lastnameString,
     phone=phoneString,
     email=emailString,
-    status=customer:getStatus():name()
+    status=customer:getStatus():name(),
   }
 end
 
@@ -1089,11 +1126,11 @@ function createUserAccount(connection, acronisURL, customerData, password, group
   if(userAccount.id == nil) then
     return false;
   else
-  
+
     local customerProviderMap = dataStore:getPrivateDataMap(customerData.uuid);
     customerProviderMap:put("acronisID", tostring(userAccount.id));
     dataStore:resetPrivateDataMap(customerData.uuid, customerProviderMap);
-  
+
     -- Update customer provider values as we have created customer account
     local adminAPI = new("AdminAPI");
     local providerValues = new("Map");
@@ -1137,7 +1174,7 @@ function deleteUserAccount(connection, acronisURL, groupID, accountID)
   end
   local user = json:decode(apiResult.response);
   user.status = 0;
-  
+
   local accountVersion = user.version;
 
   local apiResult=makeAPICall(connection, acronisURL.."/api/1/groups/"..groupID.."/users/"..accountID.."?version="..accountVersion, "PUT", json:encode({status=0}), headers, true);
@@ -1145,7 +1182,7 @@ function deleteUserAccount(connection, acronisURL, groupID, accountID)
     print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
     return nil, apiResult;
   end
-  
+
   local result = json:decode(apiResult.response);
   accountVersion = result.version;
 
@@ -1196,7 +1233,7 @@ function accessBackup(connection, acronisURL, groupID)
   headers['Content-Type']="application/json; charset=UTF-8";
   headers['Accept']="application/json";
 
-  if(groupID == nil) then 
+  if(groupID == nil) then
     groupID="self";
   end
 
@@ -1291,7 +1328,7 @@ function getBackupPlanID(connection, acronisURL, hostName, machineID)
   local headers={};
   headers['Content-Type']="application/json";
 
-  local apiResult=makeAPICall(connection, acronisURL.."/api/ams/"..hostName.."/bplans", "GET", "", headers);
+  local apiResult=makeAPICall(connection, acronisURL.."/api/ams/"..hostName.."/bplans", "GET", "", headers, false);
   if(apiResult.success == false) then
     print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
     return nil, apiResult;
@@ -1317,7 +1354,7 @@ function getBackupPlanID(connection, acronisURL, hostName, machineID)
       end
     end
   end
-  
+
   return nil;
 end
 
@@ -1329,7 +1366,7 @@ function createBackupPlan(connection, acronisURL, hostName, planName, machineID,
 
   local passwordString=backupPassword;
   local usePasswordValue=true;
-  if(passwordString == nil) then
+  if(passwordString == nil or #passwordString == 0) then
     passwordString="";
     usePasswordValue=false;
   end
@@ -1343,7 +1380,70 @@ function createBackupPlan(connection, acronisURL, hostName, planName, machineID,
   local apiParams={
     action= "createAndRun",
     data= {
+      backupType= "gct::disks",
+      id= nil,
       name= planName,
+      options= {
+        backupOptions= {
+          archiveProtection={
+            algorithm=3,
+            password=passwordString,
+            usePassword=usePasswordValue
+          },
+          diskSpeed= {
+            mode= "percent",
+            value= 100
+          },
+          exclusions= {
+            excludeSystem= false,
+            excludeHidden= false,
+            exclusionMasks= {}
+          },
+          networkSpeed= {
+            mode= "percent",
+            value= 100
+          }
+        }
+      },
+      origin= "centralized",
+      route= {
+        stages= {
+          {
+            archiveName= "Archive "..machineID.."",
+            cleanUpIfNoSpace= false,
+            destinationKind= "online",
+            maintenanceWindow=nil,
+            rules= {
+              {
+                afterBackup=true,
+                backupCountUpperLimit=0,
+                backupSetIndex=nil,
+                backupUpperLimitSize=0,
+                beforeBackup=false,
+                consolidateBackup= true,
+                deleteOlderThan=cleanUpTable,
+                deleteYongerThan= {
+                  value= 0,
+                  type= "days"
+                },
+                onSchedule=false,
+                retentionSchedule= {
+                  alarms= {},
+                  conditions= {},
+                  maxDelayPeriod= -1,
+                  maxRetries=0,
+                  preventFromSleeping=true,
+                  retryPeriod=0,
+                  unique= false,
+                  waitActionType=2
+                },
+                stagingOperationType= 0
+              }
+            },
+            useProtectionPlanCredentials=false
+          }
+        }
+      },
       scheme= {
         parameters= {
           backupSchedule= {
@@ -1352,8 +1452,6 @@ function createBackupPlan(connection, acronisURL, hostName, planName, machineID,
               type= "incremental"
             },
             schedule= {
-              unique= false,
-              retryPeriod= 0,
               alarms= {
                 {
                   beginDate= {
@@ -1361,11 +1459,23 @@ function createBackupPlan(connection, acronisURL, hostName, planName, machineID,
                     month= 0,
                     year= 0
                   },
+                  calendar= {
+                    weekInterval= 0,
+                    days= 0,
+                    type= "weekly"
+                  },
+                  distribution= {
+                    enabled= false,
+                    interval= 0,
+                    method= 0
+                  },
                   endDate= {
                     day= 0,
                     month= 0,
                     year= 0
                   },
+                  machineWake= false,
+                  onceADayFlag= false,
                   repeatAtDay= {
                     endTime= {
                       hour= 23,
@@ -1374,110 +1484,37 @@ function createBackupPlan(connection, acronisURL, hostName, planName, machineID,
                     },
                     timeInterval= timeIntervalNumber
                   },
+                  skipOccurrences= 0,
                   startTime= {
                     hour= 0,
                     minute= 0,
                     second= 0
                   },
-                  distribution= {
-                    enabled= false,
-                    interval= 0,
-                    method= 0
-                  },
-                  calendar= {
-                    weekInterval= 0,
-                    days= 0,
-                    type= "weekly"
-                  },
-                  machineWake= false,
-                  onceADayFlag= false,
-                  skipOccurrences= 0,
                   startTimeDelay= 0,
                   type= "time",
                   utcBasedSettings= false
                 }
               },
-              preventFromSleeping= true,
               conditions= {},
-              waitActionType= "run",
               maxDelayPeriod= -1,
-              maxRetries= 0
+              maxRetries= 0,
+              preventFromSleeping= true,
+              retryPeriod= 0,
+              unique= false,
+              waitActionType= "run"
             }
           },
           backupTypeRule= "alwaysFull"
         },
         type= "simple"
       },
-      options= {
-        backupOptions= {
-          archiveProtection={
-            algorithm=3,
-            password=passwordString,
-            usePassword=usePasswordValue
-          },
-          exclusions= {
-            excludeSystem= false,
-            excludeHidden= false,
-            exclusionMasks= {}
-          },
-          diskSpeed= {
-            mode= "percent",
-            value= 100
-          },
-          networkSpeed= {
-            mode= "percent",
-            value= 100
-          }
-        }
-      },
-      route= {
-        stages= {
-          {
-            destinationKind= "online",
-            useProtectionPlanCredentials= false,
-            archiveName= "Archive ["..machineID.."]",
-            maintenanceWindow= null,
-            cleanUpIfNoSpace= false,
-            rules= {
-              {
-                deleteOlderThan= cleanUpTable,
-                backupCountUpperLimit= 0,
-                backupSetIndex= null,
-                beforeBackup= false,
-                onSchedule= false,
-                deleteYongerThan= {
-                  value= 0,
-                  type= "days"
-                },
-                retentionSchedule= {
-                  conditions= {},
-                  unique= false,
-                  preventFromSleeping= true,
-                  waitActionType= 2,
-                  alarms= {},
-                  maxDelayPeriod= -1,
-                  retryPeriod= 0,
-                  maxRetries= 0
-                },
-                afterBackup= true,
-                consolidateBackup= true,
-                stagingOperationType= 0,
-                backupUpperLimitSize= 0
-              }
-            }
-          }
-        }
-      },
-      origin= "centralized",
-      id= null,
       target= {
         inclusions= {
           {
             key=machineID
           }
         }
-      },
-      backupType= "gct::disks"
+      }
     }
   };
 
@@ -1509,7 +1546,7 @@ function deleteBackupPlan(connection, acronisURL, hostName, backupPlanID)
   return json:decode(apiResult.response);
 end
 
-function getAcronisStorageUsage(connection, acronisURL, userID)
+function getAcronisStorageUsage(connection, acronisURL, userID, machineID)
   local json=new("JSON")
 
   local apiResult=makeAPICall(connection, acronisURL.."/api/1/users/"..userID, "GET", "", nil);
