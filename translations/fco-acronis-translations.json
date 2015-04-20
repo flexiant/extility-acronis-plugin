@@ -37,5 +37,7 @@
     "#__ACRONIS_BACKUP_PCT_SERVER_SETTINGS_RETENTION_DESCRIPTION": "The length of time Acronis retains the backup for",
     "#__ACRONIS_BACKUP_PCT_SERVER_SETTINGS_RETENTION_NAME": "Backup retention",
     "#__ACRONIS_BACKUP_RETENTION_OPTION_1": "Indefinitely",
-    "#__ACRONIS_BACKUP_RETENTION_OPTION_2": "30 days"
+    "#__ACRONIS_BACKUP_RETENTION_OPTION_2": "30 days",
+    "ACRONIS_BACKUP":"Acronis Backup",
+	"FCO_EXTENSION":"FCO Extension",
 }

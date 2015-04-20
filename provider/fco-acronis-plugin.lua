@@ -1,7 +1,11 @@
 --[[
 FCO Acronis Plugin
+© 2015 Flexiant Ltd
 
-{"FDLINFO":{"VERSION":"1.0.0"}}
+This FDL code block defines a configuration provider, and billing method,
+that allows the use of Acronis BaaS within FCO
+
+{"FDLINFO":{"NAME":"Acronis Plugin","VERSION":"1.0.0"}}
 ]]
 
 function register()
@@ -297,7 +301,11 @@ function server_measurement_function(p)
   local server=p.resource;
 
   local serverValues=getServerValues(server);
+
   local billingEntityValues=getBillingEntityValues(server:getBillingEntityUUID());
+  if(billingEntityValues.success == false) then
+    return { { key="acronisUsage", value=acronisUsage } }
+  end
 
   local json=new("JSON");
 
@@ -332,7 +340,7 @@ function server_measurement_function(p)
     if(backupPlanID == nil) then
       -- Does not have backup plan
 
-      local backupPlanID=createBackupPlan(connection, backupAccess.url, backupAccess.hostName, "Backup-"..server:getCustomerName().."-"..machine.id, machine.id, serverValues.retention, serverValues.frequency, serverValues.password);
+      local backupPlanID=createBackupPlan(connection, backupAccess.url, backupAccess.hostName, "Backup-"..server:getCustomerName().."-"..serverValues.ipAddress, machine.id, serverValues.retention, serverValues.frequency, serverValues.password);
       if(backupPlanID) then
         print("ACRONIS_BACKUP NOTICE", "Backup place created " ..backupPlanID);
       else
@@ -389,6 +397,10 @@ function post_job_state_change_trigger(p)
 
     if(customerValues.success) then
       local billingEntityValues=getBillingEntityValues(customerValues.beuuid);
+      if(billingEntityValues.success == false) then
+        print("ACRONIS_BACKUP ERROR", "Acronis admin credentials not found")
+        return { exitState="CONTINUE" }
+      end
 
       local simplehttp=new("simplehttp");
       local connection=simplehttp:newConnection({ enable_cookie=true, ssl_verify=true })
@@ -537,6 +549,10 @@ function pre_server_metadata_update_trigger(p)
 
   local customerValues=getCustomerValues(server:getCustomerUUID());
   local billingEntityValues=getBillingEntityValues(server:getBillingEntityUUID());
+  if(billingEntityValues.success == false) then
+    print("ACRONIS_BACKUP ERROR", "Acronis admin credentials not found")
+    return { exitState="CONTINUE" }
+  end
 
   if(customerValues.success) then
     local xmlHelper=new("FDLXMLHelper");
@@ -569,6 +585,10 @@ function post_server_state_change_trigger(p)
 
   local serverValues=getServerValues(p.input);
   local billingEntityValues=getBillingEntityValues(p.input:getBillingEntityUUID());
+  if(billingEntityValues.success == false) then
+    print("ACRONIS_BACKUP ERROR", "Acronis admin credentials not found")
+    return { exitState="CONTINUE" }
+  end
 
   -- Server is deleted, doesn't need the private data map
   dataStore:resetPrivateDataMap(serverValues.uuid, nil);
@@ -658,6 +678,11 @@ end
 function action_function_sigin(p)
 
   local billingEntityValues=getBillingEntityValues(p.resource:getBillingEntityUUID());
+  if(billingEntityValues.success == false) then
+    print("ACRONIS_BACKUP ERROR", "Acronis admin credentials not found")
+    return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_SSO_FAILED") }
+  end
+
   local customerValues=nil;
 
   if(p.resource:getResourceType():name() == "CUSTOMER") then
@@ -712,6 +737,11 @@ function action_function_register(p)
 
   local serverValues=getServerValues(p.resource);
   local billingEntityValues=getBillingEntityValues(p.resource:getBillingEntityUUID());
+  if(billingEntityValues.success == false) then
+    print("ACRONIS_BACKUP ERROR", "Acronis admin credentials not found")
+    return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_REGISTER_FAILED") }
+  end
+
   local customerValues=getCustomerValues(p.resource:getCustomerUUID());
 
   local simplehttp=new("simplehttp");
@@ -755,81 +785,6 @@ end
 
 --[[ End of Action Functions ]]
 --[[ Helper functions ]]
-
-function makeAPICall(connection, url, method, params, headers, debug)
-
-  if(debug == nil) then
-    debug = false;
-  end
-
-  local success=false;
-  local statusCode="";
-  local response="";
-
-  connection:setURL(url);
-  if(headers ~= nil) then
-    connection:clearRequestHeaders();
-    connection:setRequestHeaders(headers);
-  end
-
-  if(debug) then
-    print("makeAPICall input", method, url, params);
-  end
-
-  local apiFunction=function(value) response=response .. tostring(value); return true; end
-
-  if(method == "GET") then
-    if(connection:get(apiFunction)) then
-      success=true;
-      statusCode=connection:getHTTPStatusCode();
-    else
-      success=false;
-      statusCode, response=connection:getLastError();
-    end
-  elseif(method == "DELETE") then
-    if(connection:delete(apiFunction)) then
-      success=true;
-      statusCode=connection:getHTTPStatusCode();
-    else
-      success=false;
-      statusCode, response=connection:getLastError();
-    end
-  elseif(method == "PUT") then
-    if(connection:put(params, apiFunction)) then
-      success=true;
-      statusCode=connection:getHTTPStatusCode();
-    else
-      success=false;
-      statusCode, response=connection:getLastError();
-    end
-  elseif(method == "POST") then
-    if(connection:post(params, apiFunction)) then
-      success=true;
-      statusCode=connection:getHTTPStatusCode();
-    else
-      success=false;
-      statusCode, response=connection:getLastError();
-    end
-  end
-
-  if(statusCode ~= nil and (tonumber(statusCode) >= 300 or tonumber(statusCode) < 200)) then
-    success=false;
-    if(debug) then
-      print("makeAPICall pre-error cleanup", response, ".");
-    end
-    response=cleanErrorResponse(response);
-  end
-
-  if(debug) then
-    print("makeAPICall result", success, statusCode, response);
-  end
-
-  return{
-    success=success,
-    statusCode=statusCode,
-    response=response,
-  }
-end
 
 function getServerValues(server)
 
@@ -1017,6 +972,81 @@ function getCustomerValues(customerUUID)
     phone=phoneString,
     email=emailString,
     status=customer:getStatus():name(),
+  }
+end
+
+function makeAPICall(connection, url, method, params, headers, debug)
+
+  if(debug == nil) then
+    debug = false;
+  end
+
+  local success=false;
+  local statusCode="";
+  local response="";
+
+  connection:setURL(url);
+  if(headers ~= nil) then
+    connection:clearRequestHeaders();
+    connection:setRequestHeaders(headers);
+  end
+
+  if(debug) then
+    print("makeAPICall input", method, url, params);
+  end
+
+  local apiFunction=function(value) response=response .. tostring(value); return true; end
+
+  if(method == "GET") then
+    if(connection:get(apiFunction)) then
+      success=true;
+      statusCode=connection:getHTTPStatusCode();
+    else
+      success=false;
+      statusCode, response=connection:getLastError();
+    end
+  elseif(method == "DELETE") then
+    if(connection:delete(apiFunction)) then
+      success=true;
+      statusCode=connection:getHTTPStatusCode();
+    else
+      success=false;
+      statusCode, response=connection:getLastError();
+    end
+  elseif(method == "PUT") then
+    if(connection:put(params, apiFunction)) then
+      success=true;
+      statusCode=connection:getHTTPStatusCode();
+    else
+      success=false;
+      statusCode, response=connection:getLastError();
+    end
+  elseif(method == "POST") then
+    if(connection:post(params, apiFunction)) then
+      success=true;
+      statusCode=connection:getHTTPStatusCode();
+    else
+      success=false;
+      statusCode, response=connection:getLastError();
+    end
+  end
+
+  if(statusCode ~= nil and (tonumber(statusCode) >= 300 or tonumber(statusCode) < 200)) then
+    success=false;
+    if(debug) then
+      print("makeAPICall pre-error cleanup", response, ".");
+    end
+    response=cleanErrorResponse(response);
+  end
+
+  if(debug) then
+    print("makeAPICall result", success, statusCode, response);
+  end
+
+  return{
+    success=success,
+    statusCode=statusCode,
+    response=response,
   }
 end
 
@@ -1558,6 +1588,8 @@ function getAcronisStorageUsage(connection, acronisURL, userID, machineID)
   if(userProfile == nil or userProfile.usage == nil or userProfile.usage.storage_size == nil) then
     return 0;
   end
+
+--api/1/statistics/space_usage/?account=ivan_ivanov
 
   --1073741824 is used to covert storage_size value into a GB value
   return (tonumber(userProfile.usage.storage_size) / 1073741824);
