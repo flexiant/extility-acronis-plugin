@@ -55,10 +55,10 @@ function acronis_backup_provider()
             actionFunctions={
               {
                 key="setup_account",
-                name="#__ACRONIS_BACKUP_PCT_BE_SETTINGS_ACTION_SETUP_ACCOUNT_NAME",
-                description="#__ACRONIS_BACKUP_PCT_BE_SETTINGS_ACTION_SETUP_ACCOUNT_DESCRIPTION",
+                name="#__ACRONIS_BACKUP_PCT_BE_SETTINGS_ACTION_LINK_ACCOUNT_NAME",
+                description="#__ACRONIS_BACKUP_PCT_BE_SETTINGS_ACTION_LINK_ACCOUNT_DESCRIPTION",
                 returnType="FUNCTION",
-                executionFunction="action_function_setup_account",
+                executionFunction="action_function_link_account",
                 order=0,
                 parameters={
                   {
@@ -95,6 +95,27 @@ function acronis_backup_provider()
                     required = true
                   }
                 }
+              },
+              {
+                key="unlink_account",
+                name="#__ACRONIS_BACKUP_PCT_BE_SETTINGS_ACTION_UNLINK_ACCOUNT_NAME",
+                description="#__ACRONIS_BACKUP_PCT_BE_SETTINGS_ACTION_UNLINK_ACCOUNT_DESCRIPTION",
+                returnType="FUNCTION",
+                executionFunction="action_function_unlink_account",
+                order=1,
+                parameters={
+                  {
+                    key="confirm",
+                    name="Confirm Action",
+                    description="Hidden field use to display confirmation dialogue in UI",
+                    required=false,
+                    hidden=true,
+                    validator={
+                      validatorType="ENUM",
+                      validateString="TRUE"
+                    }
+                  }
+                }
               }
             }
           }
@@ -117,12 +138,20 @@ function acronis_backup_provider()
             },
             actionFunctions={
               {
+                key="display_details",
+                name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_NAME",
+                description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_DESCRIPTION",
+                returnType="DIALOGUE",
+                executionFunction="action_function_display_details",
+                order=0
+              },
+              {
                 key="login",
                 name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_NAME",
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_sigin",
-                order=0
+                order=1
               },
               {
                 key="login_webrestore",
@@ -130,7 +159,7 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_RESTORE_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_signin_webrestore",
-                order=1
+                order=2
               },
             }
           }
@@ -189,12 +218,20 @@ function acronis_backup_provider()
             },
             actionFunctions={
               {
+                key="display_details",
+                name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_NAME",
+                description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_DESCRIPTION",
+                returnType="DIALOGUE",
+                executionFunction="action_function_display_details",
+                order=0
+              },
+              {
                 key="login",
                 name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_NAME",
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_sigin",
-                order=0
+                order=1
               },
               {
                 key="login_webrestore",
@@ -202,14 +239,6 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_RESTORE_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_signin_webrestore",
-                order=1
-              },
-              {
-                key="register",
-                name="#__ACRONIS_BACKUP_PCT_SERVER_SETTINGS_ACTION_REGISTER_ACCOUNT_NAME",
-                description="#__ACRONIS_BACKUP_PCT_SERVER_SETTINGS_ACTION_REGISTER_ACCOUNT_DESCRIPTION",
-                returnType="STRING",
-                executionFunction="action_function_register",
                 order=2
               }
             }
@@ -267,7 +296,7 @@ function acronis_server_billing(p)
   end
 
   if(measureSize == nil or measureType == nil) then
-    return nil;
+    return { { units=0, description=translate.string("LBL_NO_CHARGE") } };
   end
 
   local chargeUnits=nil;
@@ -283,7 +312,7 @@ function acronis_server_billing(p)
   end
 
   if(chargeUnits == nil or chargeMeasureType == nil) then
-    return nil;
+    return { { units=0, description=translate.string("LBL_NO_CHARGE") } };
   end
 
   units=chargeUnits * tonumber(measureSize) * (convert_mtype(chargeMeasureType,measureType)) * -1 * p.billingFactor;
@@ -348,7 +377,6 @@ function server_measurement_function(p)
 
   if(serverValues.enabled) then
     -- Backup is enabled
-
     local customerValues=getCustomerValues(server:getCustomerUUID());
 
     if(serverValues.backupPlanID == nil) then
@@ -358,7 +386,7 @@ function server_measurement_function(p)
       if(backupPlanID ~= nil and #backupPlanID > 0) then
         serverValues.backupPlanID = backupPlanID;
         print("ACRONIS_BACKUP NOTICE", "Backup plan created " .. backupPlanID);
-        
+
         -- Reset map with password and backup plan id
         local serverData = new("Map");
         serverData:put("encryptionPassword", serverValues.password);
@@ -369,22 +397,24 @@ function server_measurement_function(p)
       end
 
       if(machine.lastBackup ~= nil) then
-        acronisUsage=getAcronisStorageUsage(connection, backupAccess.url, customerValues.acronisUsername, backupAccess.hostName, machine.instanceID);
-        if(acronisUsage > 0) then
+        logout(connection, loginResult.url);
+        acronisUsage=getAcronisStorageUsage(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, machine.instanceID);
+        if(acronisUsage > 0.0) then
           print("ACRONIS_BACKUP NOTICE", "Acronis storage usage is: "..acronisUsage.." GB for server "..serverValues.ipAddress.."");
         end
       end
     else
       -- Has existing backup plan
-      acronisUsage=getAcronisStorageUsage(connection, backupAccess.url, customerValues.acronisUsername, backupAccess.hostName, machine.instanceID);
-      if(acronisUsage > 0) then
+      logout(connection, loginResult.url);
+      acronisUsage=getAcronisStorageUsage(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, machine.instanceID);
+      if(acronisUsage > 0.0) then
         print("ACRONIS_BACKUP NOTICE", "Acronis storage usage is: "..acronisUsage.." GB for server "..serverValues.ipAddress.."");
       end
     end
   elseif(serverValues.backupPlanID ~= nil) then
     -- Backup is not enabled but we have a backup plan id, we need to delete it. We don't care about the result
     deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, serverValues.backupPlanID)
-    
+
     -- Reset map with just password, removing backup plan id
     local serverData = new("Map");
     serverData:put("encryptionPassword", serverValues.password);
@@ -514,16 +544,16 @@ function pre_create_server_trigger(p)
   if(providerValues ~= nil) then
     local passwordString = providerValues:get("password");
     if(passwordString ~= nil) then
-  
+
       local serverData = new("Map");
       serverData:put("encryptionPassword", passwordString);
       dataStore:resetPrivateDataMap(server:getResourceUUID(), serverData);
-  
+
       local newPasswordString = "";
       for i = 1, #passwordString, 1 do
         newPasswordString = newPasswordString .. "*";
       end
-  
+
       providerValues:put("password", newPasswordString);
     end
   end
@@ -694,7 +724,7 @@ end
 --[[ End of Trigger Functions ]]
 --[[ Action Functions ]]
 
-function action_function_setup_account(p)
+function action_function_link_account(p)
 
   local loginResult=nil;
   local apiResult=nil;
@@ -736,6 +766,19 @@ function action_function_setup_account(p)
   local utils = new("Utils");
 
   return { returnCode="SUCCESSFUL", returnType="FUNCTION", returnContent=utils:createRefreshFunctionActionContent(true); }
+end
+
+function action_function_unlink_account(p)
+
+  dataStore:resetPrivateDataMap(p.resource:getResourceUUID(), nil)
+
+  local adminAPI=new("AdminAPI", "current");
+  adminAPI:updateConfigurationProviderValues(p.resource:getResourceUUID(), "ACRONIS_BACKUP", nil);
+
+  local utils = new("Utils");
+
+  return { returnCode="SUCCESSFUL", returnType="FUNCTION", returnContent=utils:createRefreshFunctionActionContent(true); }
+
 end
 
 function action_function_sigin(p)
@@ -796,54 +839,107 @@ function action_function_sigin(p)
   return { returnCode="SUCCESSFUL", returnType="URL_POPUP", returnContent=utils:createURLActionContent("GET", backupConnectionDetails.sso, nil) }
 end
 
-function action_function_register(p)
+function action_function_display_details(p)
 
-  local serverValues=getServerValues(p.resource);
   local billingEntityValues=getBillingEntityValues(p.resource:getBillingEntityUUID());
   if(billingEntityValues.success == false) then
     print("ACRONIS_BACKUP ERROR", "Acronis admin credentials not found")
-    return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_REGISTER_FAILED") }
+    return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_ERROR") }
   end
 
-  local customerValues=getCustomerValues(p.resource:getCustomerUUID());
+  local customerValues=nil;
+  local serverValues=nil;
 
-  local simplehttp=new("simplehttp");
-  local connection=simplehttp:newConnection({ enable_cookie=true, ssl_verify=true })
+  if(p.resource:getResourceType():name() == "CUSTOMER") then
+    customerValues=getCustomerValues(p.resource);
+  else
+    customerValues=getCustomerValues(p.resource:getCustomerUUID());
+    serverValues=getServerValues(p.resource);
+  end
 
-  local loginResult=nil;
-  local apiResult=nil;
+  if(customerValues.success == false) then
+    print("ACRONIS_BACKUP ERROR", "Acronis customer credentials not found")
+    return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_ERROR") }
+  end
 
-  loginResult, apiResult=loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword);
-  if(loginResult == nil) then
-    if(apiResult == nil) then
-      return { returnCode="FAILED", errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_REGISTER_FAILED") }
-    else
-      return { returnCode="FAILED", errorCode=apiResult.statusCode, errorString=apiResult.response }
+  local values = {
+    {
+      key="serviceURL",
+      name=translate.string("#__ACRONIS_BACKUP_PCT_BE_SETTINGS_SERVICE_URL_NAME"),
+      description=translate.string("#__ACRONIS_BACKUP_PCT_BE_SETTINGS_SERVICE_URL_DESCRIPTION"),
+      readOnly=true,
+      value=billingEntityValues.serviceURL
+    },
+    {
+      key="acronisID",
+      name=translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ID_NAME"),
+      description=translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ID_DESCRIPTION"),
+      readOnly=true,
+      value=customerValues.acronisID
+    },
+    {
+      key="username",
+      name=translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_USERNAME_NAME"),
+      description=translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_USERNAME_DESCRIPTION"),
+      readOnly=true,
+      value=customerValues.acronisUsername
+    },
+    {
+      key="password",
+      name=translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_PASSWORD_NAME"),
+      description=translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_PASSWORD_DESCRIPTION"),
+      readOnly=true,
+      validator={
+        validatorType="PASSWORD"
+      },
+      value=customerValues.acronisPassword
+    }
+  };
+
+
+  if(serverValues ~= nil) then
+    local registered = false;
+
+    local simplehttp=new("simplehttp");
+    local connection=simplehttp:newConnection({ enable_cookie=true, ssl_verify=true })
+
+    local loginResult=nil;
+
+    loginResult = loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword);
+    if(loginResult ~= nil) then
+
+      local backupAccess=nil;
+
+      backupAccess = accessBackup(connection, loginResult.url, "self");
+      if(backupAccess == nil) then
+        logout(connection, loginResult.url);
+      else
+
+        local machine=getMachine(connection, backupAccess.url, backupAccess.hostName, serverValues.ipAddress);
+        logout(connection, loginResult.url);
+
+        registered = machine ~= nil;
+      end
     end
-  end
 
-  local backupAccess=nil;
-  apiResult=nil;
-
-  backupAccess, apiResult=accessBackup(connection, loginResult.url, "self");
-  if(backupAccess == nil) then
-    logout(connection, loginResult.url);
-
-    if(apiResult == nil) then
-      return { returnCode="FAILED", errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_REGISTER_FAILED") }
-    else
-      return { returnCode="FAILED", errorCode=apiResult.statusCode, errorString=apiResult.response }
+    local registeredString = translate.string("#__ACRONIS_BACKUP_REGISTRATION_INCOMPLETE");
+    if(registered) then
+      registeredString = translate.string("#__ACRONIS_BACKUP_REGISTRATION_COMPLETE");
     end
+
+    table.insert(values, {
+      key="",
+      name=translate.string("#__ACRONIS_BACKUP_PCT_SERVER_SETTINGS_REGISTRATION_STATE_NAME"),
+      description=translate.string("#__ACRONIS_BACKUP_PCT_SERVER_SETTINGS_REGISTRATION_STATE_DESCRIPTION"),
+      readOnly=true,
+      value=registeredString
+    })
   end
+  
+  local utils = new("Utils");
+  local returnContent = utils:createDisplayDialogueActionContent(values, translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_NAME"), translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_MESSAGE"), "FONT_ICON_CIRCLE_INFO");
 
-  local machine=getMachine(connection, backupAccess.url, backupAccess.hostName, serverValues.ipAddress);
-  logout(connection, loginResult.url);
-
-  if(machine == nil) then
-    return { returnCode="SUCCESSFUL", returnType="STRING", returnContent=translate.string("#__ACRONIS_BACKUP_MESSAGE_REGISTER_FAILED") }
-  end
-
-  return { returnCode="SUCCESSFUL", returnType="STRING", returnContent=translate.string("#__ACRONIS_BACKUP_MESSAGE_REGISTER_SUCCESS") }
+  return { returnCode="SUCCESSFUL", returnType="DIALOGUE", returnContent=returnContent }
 end
 
 function action_function_signin_webrestore(p)
@@ -919,7 +1015,7 @@ function action_function_signin_webrestore(p)
 
   local utils=new("Utils");
 
-  return { returnCode="SUCCESSFUL", returnType="URL_POPUP", returnContent=utils:createURLActionContent("GET", webstoreConnectionDetails.sso, nil) }
+  return { returnCode="SUCCESSFUL", returnType="URL_POPUP", returnContent=utils:createURLActionContent("POST", webstoreConnectionDetails.url, nil) }
 
 end
 
@@ -1219,7 +1315,11 @@ function logout(connection, acronisURL)
 
 end
 
-function loginToAcronis(connection, acronisURL, username, password)
+function loginToAcronis(connection, acronisURL, username, password, debug)
+
+  if(debug == nil) then
+    debug = false;
+  end
 
   local json=new("JSON");
 
@@ -1227,7 +1327,7 @@ function loginToAcronis(connection, acronisURL, username, password)
   headers['Content-Type']="application/json";
   headers['Accept']="application/json";
 
-  local apiResult=makeAPICall(connection, acronisURL.."/api/1/accounts/?login="..username, "GET", "", headers, false);
+  local apiResult=makeAPICall(connection, acronisURL.."/api/1/accounts/?login="..username, "GET", "", headers, debug);
   if(apiResult.success == false) then
     print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
     return nil, apiResult;
@@ -1241,7 +1341,7 @@ function loginToAcronis(connection, acronisURL, username, password)
 
   local loginCredentials=json:encode({ username=username, password=password });
 
-  apiResult=makeAPICall(connection, acronisURLParams.server_url.."/api/1/login/", "POST", loginCredentials, headers, false);
+  apiResult=makeAPICall(connection, acronisURLParams.server_url.."/api/1/login/", "POST", loginCredentials, headers, debug);
   if(apiResult.success == false) then
     print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
     return nil, apiResult;
@@ -1486,7 +1586,7 @@ function getMachine(connection, backupAccessURL, hostName, ipAddress)
   for i=1, #data, 1 do
     local item=data[i];
     if(item.type == "machine" and item.ip ~= nil and item.ip[1] == ipAddress) then
-    
+
       return{
         id=item.id,
         instanceID=item.instance_id,
@@ -1576,7 +1676,6 @@ function createBackupPlan(connection, backupAccessURL, hostName, planName, machi
       route= {
         stages= {
           {
-            archiveName= "Archive-"..planName.."",
             cleanUpIfNoSpace= false,
             destinationKind= "online",
             maintenanceWindow=nilPlaceholder,
@@ -1698,7 +1797,7 @@ function createBackupPlan(connection, backupAccessURL, hostName, planName, machi
     print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
     return nil, apiResult;
   end
-  
+
   return json:decode(apiResult.response);
 end
 
@@ -1718,18 +1817,37 @@ function deleteBackupPlan(connection, backupAccessURL, hostName, backupPlanID)
   return json:decode(apiResult.response);
 end
 
-function getAcronisStorageUsage(connection, backupAccessURL, username, hostName, machineInstanceID)
+function getAcronisStorageUsage(connection, acronisURL, username, password, machineInstanceID)
   local json=new("JSON")
 
   local headers={};
   headers['Content-Type']="application/json; charset=UTF-8";
   headers['Accept']="application/json";
 
-  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..hostName.."/statistics/space_usage?account="..username, "GET", "", headers, true);
+  local connParams={
+    username=username,
+    password=password,
+    remember=true
+  };
+
+  local loginResult=loginToAcronis(connection, acronisURL, username, password, false)
+  if(loginResult == nil or loginResult.url == nil) then
+    return 0;
+  end
+
+
+  local backupAccess=accessBackup(connection, loginResult.url, nil);
+  if(backupAccess == nil) then
+    logout(connection, loginResult.url);
+    return 0;
+  end
+
+  local apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/"..backupAccess.hostName.."/statistics/space_usage", "GET", "", headers, false);
   if(apiResult.success == false) then
     print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
     return 0;
   end
+
   local response=json:decode(apiResult.response);
   if(response == nil or type(response) ~= "table" or response.data == nil) then
     return 0;
@@ -1762,24 +1880,9 @@ function getWebRestoreConnectionDetails(connection, backupAccessURL, username, p
     return nil, apiResult;
   end
 
-  local webRestoreURL = apiResult.response;
-
-  apiResult=makeAPICall(connection, webRestoreURL.."/mobile/v1/login?login="..username.."&password="..password.."", "POST", "{}", headers, true);
-  if(apiResult.success == false) then
-    print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
-    return nil, apiResult;
-  end
-  
-  apiResult=makeAPICall(connection, webRestoreURL.."/mobile/v1/autologin", "GET", nil, headers, true);
-  if(apiResult.success == false) then
-    print("ACRONIS_BACKUP ERROR", apiResult.statusCode, apiResult.response);
-    return nil, apiResult;
-  end
-  
-  local result = json:decode(apiResult.response);
+  local webRestoreURL = apiResult.response .. "/enterprise/login/handleLoginForm.htm?email="..username.."&password="..password.."&timeZoneOffset=-180";
 
   return {
-    sso = result.text,
     url = webRestoreURL
   };
 end
@@ -1795,6 +1898,7 @@ function cleanErrorResponse(input)
   output=output:gsub("<head.->(.-)</head>","%1");
   output=output:gsub("<hr.->(.-)</hr>","%1");
   output=output:gsub("<center.->(.-)</center>","%1");
+  output=output:gsub("<p.->(.-)</p>","%1");
 
   local jsonOutput = nil;
 
