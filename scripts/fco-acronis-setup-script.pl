@@ -7,13 +7,14 @@
 #
 #	This script requires that libxml-xpath-perl be installed before being invoked.
 #
-#	Input to this script will be the type of action that is to be performed, and the backup service agent which is only required for the install action.
+#	Input to this script will be the type of action that is to be performed, and the backup service agent which is only required for the install action. If not input is given, all is assumed.
 #	
 #	all - Performs the full-install, register, and details actions.
 #	full-install - This action will update the system, install necessery packages for the install action, rpm, gcc, and make, then download the backup service agent and install the backup service agent.
 #					If you specify the backup service agent as the second input parameter the agent will be installed without downloading a new copy.
 #	install - This action will install the backup service agent. You must specify the backup service agent when invoking this action as the second input parameter.
 #	register - This action will register the machine with the backup service. The install action, including full-install, must be complete before this can be invoked.
+#	register - This action will check if the machine has been registered with the backup service. The install action, including full-install, must be complete before this can be invoked.
 #	details - This action will display the credentials that will be used to register the machine with the backup service, including the service management url, customer username, and customer password.
 #
 #
@@ -39,89 +40,91 @@ my $acronisPassword;    #CONFIG/meta/server/system/fco-acronis/password
 my $action = $ARGV[0] if ( $#ARGV >= 0 );
 my $agent = $ARGV[1] if ( $#ARGV >= 1 );
 
-if(defined($action)){
-	my $setup = 0;
-	my $install = 0;
-	my $register = 0;
-	my $details = 0;
+if(not defined($action)){
+	$action = "all";
+}
+
+my $setup = 0;
+my $install = 0;
+my $register = 0;
+my $details = 0;
+my $check = 0;
+
+if($action eq "all"){
+	$setup = 1;
+	$install = 1;
+	$register = 1;
+	$details = 1;
+}elsif($action eq "full-install"){
+	$setup = 1;
+	$install = 1;
+}elsif($action eq "install"){
+	$install = 1;
+}elsif($action eq "register"){
+	$register = 1;
+	$details = 1;
+}elsif($action eq "details"){
+	$details = 1;
+}elsif($action eq "check"){
+	$check = 1;
+}else{
+	print STDERR "No action argument found, expecting all, full-install, install, register, or details\n";
+	exit;
+}
+
+if($setup){
+	print STDERR "Updating system\n";
+	system("sudo apt-get --yes --force-yes update");
 	
-	if($action eq "all"){
-		$setup = 1;
-		$install = 1;
-		$register = 1;
-		$details = 1;
-	}elsif($action eq "full-install"){
-		$setup = 1;
-		$install = 1;
-	}elsif($action eq "install"){
-		$install = 1;
-	}elsif($action eq "register"){
-		$register = 1;
-		$details = 1;
-	}elsif($action eq "details"){
-		$details = 1;
-	}else{
-		print STDERR "No action argument found, expecting all, full-install, install, register, or details\n";
+	print STDERR "Installing necessery packages\n";
+	system("sudo apt-get --yes --force-yes install rpm gcc make");
+	
+	if(not defined($agent)){
+		print STDERR "Downloading backup client agent\n";
+		system("sudo wget -O Backup_Client_for_Linux.bin 'http://dl.managed-protection.com/u/baas/Backup_Client_for_Linux_en-US_x86_64.bin'");
+		system("sudo chmod 755 Backup_Client_for_Linux.bin");
+	
+		$agent = "Backup_Client_for_Linux.bin"; 
+	}
+}
+
+if($register or $details or $check){
+	readMetadata();
+
+	if(not defined($acronisURL)){
+		print STDERR "No FCO/Acronis metadata found\n";
+		exit;
+	}
+
+	if($details){
+		print STDERR "Registration credentials\n";
+		print STDERR "Management URL $acronisURL\n";
+		print STDERR "Username $acronisUsername\n";
+		print STDERR "Password $acronisPassword\n";
+	}
+}
+
+if($install){
+	if(not defined($agent)){
+		print STDERR "No backup agent defined\n";
 		exit;
 	}
 	
-	if($setup){
-		print STDERR "Updating system\n";
-		system("sudo apt-get --yes --force-yes update");
-		
-		print STDERR "Installing necessery packages\n";
-		system("sudo apt-get --yes --force-yes install rpm gcc make");
-		
-		if(not defined($agent)){
-			print STDERR "Downloading backup client agent\n";
-			system("sudo wget -O Backup_Client_for_Linux.bin 'http://dl.managed-protection.com/u/baas/Backup_Client_for_Linux_en-US_x86_64.bin'");
-			system("sudo chmod 755 Backup_Client_for_Linux.bin");
-		
-			$agent = "Backup_Client_for_Linux.bin"; 
-		}
+	if($register){
+		print STDERR "Installing backup agent and registering server with backup service\n";
+		# Install and register.
+		system ("sudo ./$agent -a -C $acronisURL -g $acronisUsername -w $acronisPassword");
+	}else{
+		print STDERR "Installing backup agent\n";
+		# Just Install.
+		system ("sudo ./$agent -a");
 	}
-	
-	if($register or $details){
-		readMetadata();
-	
-		if(not defined($acronisURL)){
-			print STDERR "No FCO/Acronis metadata found\n";
-			exit;
-		}
-	
-		if($details){
-			print STDERR "Registration credentials\n";
-			print STDERR "Management URL $acronisURL\n";
-			print STDERR "Username $acronisUsername\n";
-			print STDERR "Password $acronisPassword\n";
-		}
-	}
-	
-	if($install){
-		if(not defined($agent)){
-			print STDERR "No backup agent defined\n";
-			exit;
-		}
-		
-		if($register){
-			print STDERR "Installing backup agent and registering server with backup service\n";
-			# Install and register.
-			system ("sudo ./$agent -a -C $acronisURL -g $acronisUsername -w $acronisPassword");
-		}else{
-			print STDERR "Installing backup agent\n";
-			# Just Install.
-			system ("sudo ./$agent -a");
-		}
-	}elsif($register){
-		print STDERR "Registering server with Backup Service\n";
-		system ("sudo /usr/lib/Acronis/BackupAndRecovery/AmsRegisterHelper register $acronisURL $acronisUsername $acronisPassword");
-	}
-	
-	print STDERR "Setup Complete\n";
-	
-}else{
-	print STDERR "No action argument found, expecting all, full-install, install, register, or details\n";
+}elsif($register){
+	print STDERR "Registering server with Backup Service\n";
+	system ("sudo /usr/lib/Acronis/BackupAndRecovery/AmsRegisterHelper register $acronisURL $acronisUsername $acronisPassword");
 }
+
+print STDERR "Setup Complete\n";
 
 sub readMetadata {
 	my $count = 0;

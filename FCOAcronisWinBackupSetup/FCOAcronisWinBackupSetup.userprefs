@@ -1,0 +1,9 @@
+﻿<Properties StartupItem="FCOAcronisWinBackupSetup/FCOAcronisWinBackupSetup.csproj">
+  <AuthorInfo Name="Flexiant" Email="" Copyright="2015 Flexiant Limited" Company="Flexiant" Trademark="" />
+  <MonoDevelop.Ide.Workspace ActiveConfiguration="Debug|x86" />
+  <MonoDevelop.Ide.Workbench />
+  <MonoDevelop.Ide.DebuggingService.Breakpoints>
+    <BreakpointStore />
+  </MonoDevelop.Ide.DebuggingService.Breakpoints>
+  <MonoDevelop.Ide.DebuggingService.PinnedWatches />
+</Properties>
