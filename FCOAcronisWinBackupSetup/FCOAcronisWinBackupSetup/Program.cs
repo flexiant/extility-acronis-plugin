@@ -12,7 +12,7 @@
 /// Install - This action requires the Backup Client for Windows executable, or the BackupClient.msi, to be specified as the second parameter. 
 /// 			This will extract the BackupClient.msi from the Backup Client executable if specified then install the client using the BackupClient.msi
 /// Register - This will register the machine with the Backup Service. This can only take place after an install or full install.
-/// Check - This will check if the machine is regsiter with the Backup Service. This can only take place after an install or full install.
+/// Check - This will check if the machine is register with the Backup Service. This can only take place after an install or full install.
 /// Details - This will display the configuration details that would be used to register the machine with the backup service.
 /// 
 /// Example 1.
@@ -273,7 +273,7 @@ namespace FCOAcronisWinBackupSetup
 				application = "C:\\Program Files\\7-Zip\\7z.exe";
 				if (!File.Exists (application)) {
 					Console.WriteLine ("This application requires the archive tool 7z to extract the required .msi from the Backup Client for Windows executable");
-					Console.WriteLine ("Please enter full path and filename to 7x.exe, alternativly hit enter to quit.");
+					Console.WriteLine ("Please enter full path and filename to 7x.exe, alternatively hit enter to quit.");
 					Console.WriteLine ("If you do not want to install 7z then you can extract the backupClient.msi from the executable and pass it as an argument for the 'install' action");
 					application = Console.ReadLine ();
 					if (application == null || application.Length == 0) {
