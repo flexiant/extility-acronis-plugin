@@ -13,8 +13,8 @@
 #	full-install - This action will update the system, install necessary packages for the install action, rpm, gcc, and make, then download the backup service agent and install the backup service agent.
 #					If you specify the backup service agent as the second input parameter the agent will be installed without downloading a new copy.
 #	install - This action will install the backup service agent. You must specify the backup service agent when invoking this action as the second input parameter.
-#	register - This action will register the machine with the backup service. The install action, including full-install, must be complete before this can be invoked.
-#	check - This action will check if the machine has been registered with the backup service. The install action, including full-install, must be complete before this can be invoked.
+#	register - This action will register the machine with the backup service. The install action, or full-install, must be complete before this can be invoked.
+#	check - This action will check if the machine has been registered with the backup service. The install action, or full-install, must be complete before this can be invoked.
 #	details - This action will display the credentials that will be used to register the machine with the backup service, including the service management url, customer username, and customer password.
 #
 #
@@ -54,7 +54,6 @@ if($action eq "all"){
 	$setup = 1;
 	$install = 1;
 	$register = 1;
-	$details = 1;
 }elsif($action eq "full-install"){
 	$setup = 1;
 	$install = 1;
@@ -65,7 +64,6 @@ if($action eq "all"){
 	$install = 1;
 }elsif($action eq "register"){
 	$register = 1;
-	$details = 1;
 }elsif($action eq "details"){
 	$details = 1;
 }elsif($action eq "check"){
@@ -125,6 +123,9 @@ if($install){
 }elsif($register){
 	print STDERR "Registering server with Backup Service\n";
 	system ("sudo /usr/lib/Acronis/BackupAndRecovery/AmsRegisterHelper register $acronisURL $acronisUsername $acronisPassword");
+}elsif($check){
+	print STDERR "Registering server with Backup Service\n";
+	system ("sudo /usr/lib/Acronis/BackupAndRecovery/AmsRegisterHelper check $acronisURL $acronisUsername $acronisPassword");
 }
 
 print STDERR "Setup Complete\n";

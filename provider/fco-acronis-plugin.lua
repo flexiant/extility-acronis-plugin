@@ -422,7 +422,7 @@ function server_measurement_function(p)
   end
   
   if(acronisUsage > 0.0) then
-    local syslog = new("syslog")
+    local syslog = new("syslog");
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
     syslog.syslog("LOG_INFO", "Acronis storage usage is: "..acronisUsage.." GB for server "..serverValues.ipAddress.."");
     syslog.closelog();
@@ -734,20 +734,20 @@ function post_server_state_change_trigger(p)
     return { exitState="CONTINUE" }
   end
 
-  local backupAccess=accessBackup(connection, loginResult.url, billingEntityValues.groupID);
+  local backupAccess=accessBackup(connection, loginResult.url, billingEntityValues.groupID, false);
   if(backupAccess == nil) then
     logout(connection, loginResult.url);
     return { exitState="CONTINUE" }
   end
 
-  local machine=getMachine(connection, backupAccess.url, backupAccess.hostName, serverValues.ipAddress);
+  local machine=getMachine(connection, backupAccess.url, backupAccess.hostName, serverValues.ipAddress, false);
   if(machine == nil) then
     logout(connection, loginResult.url);
     return { exitState="CONTINUE" }
   end
 
   if(serverValues.backupPlanID ~= nil) then
-    deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, serverValues.backupPlanID);
+    deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, serverValues.backupPlanID, false);
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
     syslog.syslog("LOG_INFO", "Backup Plan " ..serverValues.backupPlanID.." has been deleted");
@@ -1324,7 +1324,13 @@ function makeAPICall(connection, url, method, params, headers, debug)
   local responseHeaders=nil;
 
   if(debug) then
-    print("makeAPICall input", method, url, params);
+    local syslog = new("syslog")
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_INFO", "Make API Call Request");
+    syslog.syslog("LOG_INFO", method);
+    syslog.syslog("LOG_INFO", url);
+    syslog.syslog("LOG_INFO", params);
+    syslog.closelog();
   end
 
   local apiFunction=function(value) response=response .. tostring(value); return true; end
@@ -1369,9 +1375,6 @@ function makeAPICall(connection, url, method, params, headers, debug)
 
   if(statusCode ~= nil and (tonumber(statusCode) >= 300 or tonumber(statusCode) < 200)) then
     success=false;
-    if(debug) then
-      print("makeAPICall pre-error cleanup", response, ".");
-    end
     local cleanResponse=cleanErrorResponse(response);
 
     if(cleanResponse == response and tonumber(statusCode) == 100) then
@@ -1388,7 +1391,13 @@ function makeAPICall(connection, url, method, params, headers, debug)
   end
 
   if(debug) then
-    print("makeAPICall result", success, statusCode, response);
+    local syslog = new("syslog")
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_INFO", "Make API Call Result");
+    syslog.syslog("LOG_INFO", tostring(success));
+    syslog.syslog("LOG_INFO", tostring(statusCode));
+    syslog.syslog("LOG_INFO",  tostring(response));
+    syslog.closelog();
   end
 
   return{
@@ -1608,7 +1617,11 @@ function deleteUserAccount(connection, acronisURL, groupID, accountID)
   return true;
 end
 
-function getBackupConnectionDetails(connection, acronisURL, groupID)
+function getBackupConnectionDetails(connection, acronisURL, groupID, debug)
+
+  if(debug == nil) then
+    debug = false;
+  end
 
   local json=new("JSON");
 
@@ -1616,7 +1629,7 @@ function getBackupConnectionDetails(connection, acronisURL, groupID)
   headers['Content-Type']="application/json; charset=UTF-8";
   headers['Accept']="application/json";
 
-  local apiResult=makeAPICall(connection, acronisURL.."/api/1/groups/"..groupID.."/backupconsole", "GET", "", headers, false);
+  local apiResult=makeAPICall(connection, acronisURL.."/api/1/groups/"..groupID.."/backupconsole", "GET", "", headers, debug);
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
@@ -1641,7 +1654,11 @@ function getBackupConnectionDetails(connection, acronisURL, groupID)
 
 end
 
-function accessBackup(connection, acronisURL, groupID)
+function accessBackup(connection, acronisURL, groupID, debug)
+
+  if(debug == nil) then
+    debug = false;
+  end
 
   local json=new("JSON");
 
@@ -1655,12 +1672,12 @@ function accessBackup(connection, acronisURL, groupID)
 
   local backupConnectionDetails = nil;
   local apiResult = nil;
-  backupConnectionDetails, apiResult = getBackupConnectionDetails(connection, acronisURL, groupID);
+  backupConnectionDetails, apiResult = getBackupConnectionDetails(connection, acronisURL, groupID, debug);
   if(backupConnectionDetails == nil) then
     return nil, apiResult;
   end
 
-  local apiResult = makeAPICall(connection, backupConnectionDetails.url.."/api/remote_connection", "POST", json:encode({access_token=backupConnectionDetails.token}), headers, false);
+  local apiResult = makeAPICall(connection, backupConnectionDetails.url.."/api/remote_connection", "POST", json:encode({access_token=backupConnectionDetails.token}), headers, debug);
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
@@ -1678,7 +1695,11 @@ function accessBackup(connection, acronisURL, groupID)
   }, nil
 end
 
-function getMachine(connection, backupAccessURL, hostName, ipAddress)
+function getMachine(connection, backupAccessURL, hostName, ipAddress, debug)
+
+  if(debug == nil) then
+    debug = false;
+  end
 
   if(backupAccessURL == nil or hostName == nil or ipAddress == nil) then
     return nil;
@@ -1690,7 +1711,7 @@ function getMachine(connection, backupAccessURL, hostName, ipAddress)
   headers['Content-Type']="application/json; charset=UTF-8";
   headers['Accept']="application/json";
 
-  local apiResult=makeAPICall(connection, backupAccessURL.."/api/subscriptions", "POST", "{}", headers, false);
+  local apiResult=makeAPICall(connection, backupAccessURL.."/api/subscriptions", "POST", "{}", headers, debug);
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
@@ -1700,7 +1721,7 @@ function getMachine(connection, backupAccessURL, hostName, ipAddress)
   end
   local response=json:decode(apiResult.response);
 
-  apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/" .. hostName .. "/resources?subscriptionId=" .. response.id .. "&recursive=5", "GET", "", headers, false);
+  apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/" .. hostName .. "/resources?subscriptionId=" .. response.id .. "&recursive=5", "GET", "", headers, debug);
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
@@ -1939,14 +1960,18 @@ function createBackupPlan(connection, backupAccessURL, hostName, planName, machi
   return json:decode(apiResult.response);
 end
 
-function deleteBackupPlan(connection, backupAccessURL, hostName, backupPlanID)
+function deleteBackupPlan(connection, backupAccessURL, hostName, backupPlanID, debug)
+
+  if(debug == nil) then
+    debug = false;
+  end
 
   local json=new("JSON");
   local headers={};
   headers['Content-Type']="application/json; charset=UTF-8";
   headers['Accept']="application/json";
 
-  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..hostName.."/bplans/"..backupPlanID, "DELETE", "", headers, false);
+  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..hostName.."/bplans/"..backupPlanID, "DELETE", "", headers, debug);
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
@@ -2001,8 +2026,8 @@ function getAcronisStorageUsage(connection, acronisURL, username, password, mach
 
   for i = 1, #data, 1 do
     local response = data[i];
-    if(response.instance == machineInstanceID) then
-      --1073741824 is used to covert bytes into a GB value
+    if(response.instanceId == machineInstanceID) then
+      -- 'value / 1073741824' is used to covert bytes into a GB value
       return (tonumber(response.value) / 1073741824);
     end
   end
