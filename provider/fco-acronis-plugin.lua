@@ -138,20 +138,12 @@ function acronis_backup_provider()
             },
             actionFunctions={
               {
-                key="display_details",
-                name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_NAME",
-                description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_DESCRIPTION",
-                returnType="DIALOGUE",
-                executionFunction="action_function_display_details",
-                order=0
-              },
-              {
                 key="login",
                 name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_NAME",
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_sigin",
-                order=1
+                order=0
               },
               {
                 key="login_webrestore",
@@ -159,8 +151,16 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_RESTORE_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_signin_webrestore",
-                order=2
+                order=1
               },
+              {
+                key="display_details",
+                name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_NAME",
+                description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_DESCRIPTION",
+                returnType="DIALOGUE",
+                executionFunction="action_function_display_details",
+                order=2
+              }
             }
           }
         }
@@ -218,20 +218,12 @@ function acronis_backup_provider()
             },
             actionFunctions={
               {
-                key="display_details",
-                name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_NAME",
-                description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_DESCRIPTION",
-                returnType="DIALOGUE",
-                executionFunction="action_function_display_details",
-                order=0
-              },
-              {
                 key="login",
                 name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_NAME",
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_sigin",
-                order=1
+                order=0
               },
               {
                 key="login_webrestore",
@@ -239,6 +231,14 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_RESTORE_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_signin_webrestore",
+                order=1
+              },
+              {
+                key="display_details",
+                name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_NAME",
+                description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_DESCRIPTION",
+                returnType="DIALOGUE",
+                executionFunction="action_function_display_details",
                 order=2
               }
             }
@@ -341,7 +341,7 @@ function server_measurement_function(p)
       version=1
     }
   end
-  
+
   local acronisUsage=0;
   local server=p.resource;
 
@@ -375,26 +375,21 @@ function server_measurement_function(p)
     return { { key="acronisUsage", value=acronisUsage } }
   end
 
+  local backupPlanID = getBackupPlanID(connection, backupAccess.url, backupAccess.hostName, machine.id, false);
+
   if(serverValues.enabled) then
     -- Backup is enabled
     local customerValues=getCustomerValues(server:getCustomerUUID());
 
-    if(serverValues.backupPlanID == nil) then
+    if(backupPlanID == nil) then
       -- Does not have backup plan
 
-      local backupPlanID = createBackupPlan(connection, backupAccess.url, backupAccess.hostName, "Backup-"..server:getCustomerName().."-"..serverValues.ipAddress, machine.id, serverValues.retention, serverValues.frequency, serverValues.password);
-      if(backupPlanID ~= nil and #backupPlanID > 0) then
-        serverValues.backupPlanID = backupPlanID;
+      local success = createBackupPlan(connection, backupAccess.url, backupAccess.hostName, "Backup-"..server:getCustomerName().."-"..serverValues.ipAddress, machine.id, serverValues.retention, serverValues.frequency, serverValues.password, false);
+      if(success) then
         local syslog = new("syslog")
         syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-        syslog.syslog("LOG_INFO", "Backup plan created " .. backupPlanID);
+        syslog.syslog("LOG_INFO", "Backup plan created for machine " .. serverValues.ipAddress);
         syslog.closelog();
-
-        -- Reset map with password and backup plan id
-        local serverData = new("Map");
-        serverData:put("encryptionPassword", serverValues.password);
-        serverData:put("backupPlanID", backupPlanID);
-        dataStore:resetPrivateDataMap(server:getResourceUUID(), serverData);
       else
         local syslog = new("syslog")
         syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
@@ -411,16 +406,11 @@ function server_measurement_function(p)
       logout(connection, loginResult.url);
       acronisUsage=getAcronisStorageUsage(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, machine.instanceID);
     end
-  elseif(serverValues.backupPlanID ~= nil) then
+  elseif(backupPlanID ~= nil) then
     -- Backup is not enabled but we have a backup plan id, we need to delete it. We don't care about the result
-    deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, serverValues.backupPlanID)
-
-    -- Reset map with just password, removing backup plan id
-    local serverData = new("Map");
-    serverData:put("encryptionPassword", serverValues.password);
-    dataStore:resetPrivateDataMap(server:getResourceUUID(), serverData);
+    deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, backupPlanID)
   end
-  
+
   if(acronisUsage > 0.0) then
     local syslog = new("syslog");
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
@@ -486,9 +476,9 @@ function post_job_state_change_trigger(p)
       local syslog = new("syslog")
       syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
       if(createUserAccount) then
-         syslog.syslog("LOG_INFO", "New user account created on Acronis");
+        syslog.syslog("LOG_INFO", "New user account created on Acronis");
       else
-         syslog.syslog("LOG_INFO", "User account exists on Acronis");
+        syslog.syslog("LOG_INFO", "User account exists on Acronis");
       end
       syslog.closelog();
 
@@ -626,7 +616,7 @@ function post_create_server_trigger(p)
       if(createUserAccount == nil) then
         return { exitState="CONTINUE" }
       end
-      
+
       local syslog = new("syslog")
       syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
       if(createUserAccount) then
@@ -746,11 +736,13 @@ function post_server_state_change_trigger(p)
     return { exitState="CONTINUE" }
   end
 
-  if(serverValues.backupPlanID ~= nil) then
-    deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, serverValues.backupPlanID, false);
+  local backupPlanID = getBackupPlanID(connection, backupAccess.url, backupAccess.hostName, machine.id, false);
+
+  if(backupPlanID ~= nil) then
+    deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, backupPlanID, false);
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_INFO", "Backup Plan " ..serverValues.backupPlanID.." has been deleted");
+    syslog.syslog("LOG_INFO", "Backup Plan " ..backupPlanID.." has been deleted");
     syslog.closelog();
   end
 
@@ -845,7 +837,7 @@ function action_function_sigin(p)
   else
     customerValues=getCustomerValues(p.resource:getCustomerUUID());
   end
-  
+
   if(customerValues.success == false or customerValues.exists == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
@@ -997,7 +989,7 @@ function action_function_display_details(p)
       readOnly=true,
       value=registeredString
     });
-    
+
     table.insert(values, {
       key="encryption",
       name=translate.string("#__ACRONIS_BACKUP_PCT_SERVER_SETTINGS_PASSWORD_NAME"),
@@ -1011,7 +1003,7 @@ function action_function_display_details(p)
       value=serverValues.password
     });
   end
-  
+
   local utils = new("Utils");
   local returnContent = utils:createDisplayDialogueActionContent(values, translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_NAME"), translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_MESSAGE"), "FONT_ICON_CIRCLE_INFO");
 
@@ -1036,7 +1028,7 @@ function action_function_signin_webrestore(p)
   else
     customerValues=getCustomerValues(p.resource:getCustomerUUID());
   end
-  
+
   if(customerValues.success == false or customerValues.exists == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
@@ -1130,11 +1122,9 @@ function getServerValues(server)
   local frequencyNumber=tonumber(frequencyString);
 
   local passwordString="";
-  local backupPlanIDString="";
   local serverData = dataStore:getPrivateDataMap(server:getResourceUUID());
   if(serverData ~= nil) then
     passwordString=serverData:get("encryptionPassword");
-    backupPlanIDString=serverData:get("backupPlanID");
   end
 
   local ipAddressString="";
@@ -1153,7 +1143,6 @@ function getServerValues(server)
     frequency=frequencyNumber,
     password=passwordString,
     ipAddress=ipAddressString,
-    backupPlanID=backupPlanIDString
   }
 end
 
@@ -1775,7 +1764,11 @@ function deleteMachine(connection, backupAccessURL, hostName, ipAddress)
   return true;
 end
 
-function createBackupPlan(connection, backupAccessURL, hostName, planName, machineID, backupRetention, backupFrequency, backupPassword)
+function createBackupPlan(connection, backupAccessURL, hostName, planName, machineID, backupRetention, backupFrequency, backupPassword, debug)
+
+  if(debug == nil) then
+    debug = false;
+  end
 
   planName = string.gsub(planName, " ", "_");
 
@@ -1804,8 +1797,13 @@ function createBackupPlan(connection, backupAccessURL, hostName, planName, machi
     }
   end
 
+  local actionString = "createAndRun";
+  if(debug) then
+    actionString = "create";
+  end
+
   local apiParams={
-    action= "createAndRun",
+    action= actionString,
     data= {
       backupType= "gct::disks",
       id= nilPlaceholder,
@@ -1948,7 +1946,7 @@ function createBackupPlan(connection, backupAccessURL, hostName, planName, machi
   local apiParamString = json:encode(apiParams);
   apiParamString = string.gsub(apiParamString, "\""..nilPlaceholder.."\"", "null");
 
-  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..hostName.."/bplans", "POST", apiParamString, headers, false);
+  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..hostName.."/bplans", "POST", apiParamString, headers, debug);
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
@@ -1957,7 +1955,7 @@ function createBackupPlan(connection, backupAccessURL, hostName, planName, machi
     return nil, apiResult;
   end
 
-  return json:decode(apiResult.response);
+  return planName;
 end
 
 function deleteBackupPlan(connection, backupAccessURL, hostName, backupPlanID, debug)
@@ -1981,6 +1979,50 @@ function deleteBackupPlan(connection, backupAccessURL, hostName, backupPlanID, d
   end
 
   return json:decode(apiResult.response);
+end
+
+
+function getBackupPlanID(connection, backupAccessURL, hostName, machineID, debug)
+
+  if(debug == nil) then
+    debug = false;
+  end
+
+  local json=new("JSON");
+  local headers={};
+  headers['Content-Type']="application/json; charset=UTF-8";
+  headers['Accept']="application/json";
+
+  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..hostName.."/bplans", "GET", "", headers, debug);
+  if(apiResult.success == false) then
+    local syslog = new("syslog")
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.closelog();
+    return nil, apiResult;
+  end
+  local backupPlans=json:decode(apiResult.response);
+
+  local data=backupPlans["data"];
+  if(data == nil) then
+    return nil;
+  end
+
+  for key, value in pairs(data) do
+    local target=value["target"];
+    if(target ~= nil) then
+      local inclusions=target["inclusions"];
+      if(inclusions ~= nil and #inclusions > 0) then
+        for i=1, #inclusions, 1 do
+          if(inclusions[i].key == machineID) then
+            return value.id;
+          end
+        end
+      end
+    end
+  end
+
+  return nil;
 end
 
 function getAcronisStorageUsage(connection, acronisURL, username, password, machineInstanceID)
