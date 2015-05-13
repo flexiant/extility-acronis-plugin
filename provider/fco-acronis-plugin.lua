@@ -12,6 +12,20 @@ function register()
   return { "acronis_backup_provider", "acronis_server_billing" }
 end
 
+function init()
+
+  local adminAPI = new("AdminAPI", "Current");
+  local blobUUID = getScriptBlobUUID();
+
+  local blob = adminAPI:getResource(blobUUID, false);
+  if(blob ~= nil) then
+    if(blob:isPublicResource() == false) then
+      blob:setPublicResource(true)
+      adminAPI:modifyBlob(blob, nil)
+    end
+  end
+end
+
 --[[ Configuration Provider ]]
 function acronis_backup_provider()
   return{
@@ -651,7 +665,7 @@ function pre_server_metadata_update_trigger(p)
       ref="pre_server_metadata_update_trigger",
       name="Acronis Server Metadata Trigger",
       description="PRE_SERVER_METADATA_UPDATE trigger that will add the acronis",
-      priority=-9000,
+      priority=-8000,
       triggerType="PRE_SERVER_METADATA_UPDATE",
       triggerOptions={ "ANY" },
       api="TRIGGER",
@@ -674,13 +688,57 @@ function pre_server_metadata_update_trigger(p)
 
   if(customerValues.success) then
     local xmlHelper=new("FDLXMLHelper");
-    local runtimeNode=xmlHelper:findNode(document, "CONFIG/meta/server/system");
+    local serverSystemNode=xmlHelper:findNode(document, "CONFIG/meta/server/system");
 
-    local acronisNode = xmlHelper:addNode(document, runtimeNode, "fco-acronis");
+    local acronisNode = xmlHelper:addNode(document, serverSystemNode, "fco-acronis");
 
+    local scriptDownloadLink = billingEntityValues.cpURL .. "/rest/open/current/resources/blob/" ..getScriptBlobUUID() .. "/download";
+
+    xmlHelper:addTextNode(document, acronisNode, "script-download", scriptDownloadLink);
     xmlHelper:addTextNode(document, acronisNode, "url", billingEntityValues.serviceURL);
     xmlHelper:addTextNode(document, acronisNode, "username", customerValues.acronisUsername);
     xmlHelper:addTextNode(document, acronisNode, "password", customerValues.acronisPassword);
+
+    local cloudInit = "bootcmd:\n";
+    cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/fco-acronis-setup-script.pl";
+    -- TODO : get rid of this line after you have tested download works
+    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl details >> /tmp/fco-acronis-details.txt";
+    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl all";
+
+    local runtimeNode = xmlHelper:findNode(document, "CONFIG/meta/runtime");
+    local systemNode = xmlHelper:findNode(runtimeNode, "system");
+    local userdataNode = nil;
+    
+    if(systemNode == nil) then
+      systemNode = xmlHelper:addNode(document, runtimeNode, "system");
+    else
+      userdataNode = xmlHelper:findNode(systemNode, "userdata");
+    end
+
+    local cData = "";
+    local boundary = "runtimemetadataboundary";
+    
+    if(userdataNode == nil) then
+      cData = "Content-Type: multipart/mixed; boundary=\""..boundary.."\"\n";
+      cData = cData.."MIME-Version: 1.0\n"
+    else
+      cData = userdataNode:getTextContent()
+      xmlHelper:removeNode(systemNode, userdataNode)
+    end
+
+    cData = cData:gsub( "%-%-"..boundary.."%-%-", " \n")
+
+    cData = cData.."\n--"..boundary.."\n"
+    cData = cData.."Content-Type: text/cloud-config; charset=\"us-ascii\"\n"
+    cData = cData.."MIME-Version: 1.0\n"
+    cData = cData.."Content-Transfer-Encoding: 7bit\n"
+    cData = cData.."Content-Disposition: attachment; filename=\"fco-acronis.fake\"\n"
+    cData = cData.."\n"
+
+    cData = cData..cloudInit
+    cData = cData.."--"..boundary.."--\n"
+
+    xmlHelper:addCDataNode(document, systemNode, "userdata", cData)
 
     return { exitState="SUCCESS" }
   end
@@ -1155,9 +1213,17 @@ function getBillingEntityValues(billingEntity)
   local passwordString=nil;
   local serviceURLString=nil;
   local success=false;
+  local cpURLString=nil;
 
   if(type(billingEntity) ~= "string") then
     beUUID=billingEntity:getResourceUUID();
+  else
+    local adminAPI = new("AdminAPI", "Current");
+    billingEntity = adminAPI:getResource(beUUID, false);
+  end
+
+  if(billingEntity ~= nil) then
+    cpURLString = billingEntity:getControlPanelURL();
   end
 
   local billingData = dataStore:getPrivateDataMap(beUUID);
@@ -1177,6 +1243,7 @@ function getBillingEntityValues(billingEntity)
     username=usernameString,
     password=passwordString,
     serviceURL=serviceURLString,
+    cpURL=cpURLString,
     success=success
   }
 end
@@ -2135,6 +2202,11 @@ function getRandomString(length)
   end
 
   return randomString;
+end
+
+function getScriptBlobUUID()
+  local hasher = new ("FDLHashHelper");
+  return hasher:getNamedUUID("_skyline/blobs/fco-acronis-setup-script.pl");
 end
 
 --[[ End of Helper Functions ]]
