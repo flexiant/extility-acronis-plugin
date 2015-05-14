@@ -15,15 +15,25 @@ end
 function init()
 
   local adminAPI = new("AdminAPI", "Current");
-  local blobUUID = getScriptBlobUUID();
+  local linuxBlobUUID = getLinuxScriptBlobUUID();
 
-  local blob = adminAPI:getResource(blobUUID, false);
+  local blob = adminAPI:getResource(linuxBlobUUID, false);
   if(blob ~= nil) then
     if(blob:isPublicResource() == false) then
       blob:setPublicResource(true)
       adminAPI:modifyBlob(blob, nil)
     end
   end
+  
+  local windowsBlobUUID = getWindowExecutableBlobUUID();
+  blob = adminAPI:getResource(windowsBlobUUID, false);
+  if(blob ~= nil) then
+    if(blob:isPublicResource() == false) then
+      blob:setPublicResource(true)
+      adminAPI:modifyBlob(blob, nil)
+    end
+  end
+  
 end
 
 --[[ Configuration Provider ]]
@@ -692,18 +702,20 @@ function pre_server_metadata_update_trigger(p)
 
     local acronisNode = xmlHelper:addNode(document, serverSystemNode, "fco-acronis");
 
-    local scriptDownloadLink = billingEntityValues.cpURL .. "/rest/open/current/resources/blob/" ..getScriptBlobUUID() .. "/download";
-
-    xmlHelper:addTextNode(document, acronisNode, "script-download", scriptDownloadLink);
+    local scriptDownloadLink = billingEntityValues.cpURL .. "/rest/open/current/resources/blob/" ..getLinuxScriptBlobUUID() .. "/download";
+    xmlHelper:addTextNode(document, acronisNode, "linux-download", scriptDownloadLink);
+    
+    local windowsDownloadLink = billingEntityValues.cpURL .. "/rest/open/current/resources/blob/" .. getWindowExecutableBlobUUID() .. "/download";
+    xmlHelper:addTextNode(document, acronisNode, "windows-download", windowsDownloadLink);
     xmlHelper:addTextNode(document, acronisNode, "url", billingEntityValues.serviceURL);
     xmlHelper:addTextNode(document, acronisNode, "username", customerValues.acronisUsername);
     xmlHelper:addTextNode(document, acronisNode, "password", customerValues.acronisPassword);
 
     local cloudInit = "bootcmd:\n";
-    cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/fco-acronis-setup-script.pl";
+    cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/fco-acronis-setup-script.pl\n";
     -- TODO : get rid of this line after you have tested download works
-    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl details >> /tmp/fco-acronis-details.txt";
-    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl all";
+    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl details >> /tmp/fco-acronis-details.txt\n";
+    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl all\n";
 
     local runtimeNode = xmlHelper:findNode(document, "CONFIG/meta/runtime");
     local systemNode = xmlHelper:findNode(runtimeNode, "system");
@@ -861,7 +873,7 @@ function action_function_link_account(p)
 
   local utils = new("Utils");
 
-  return { returnCode="SUCCESSFUL", returnType="FUNCTION", returnContent=utils:createRefreshFunctionActionContent(true); }
+  return { returnCode="SUCCESSFUL", returnType="FUNCTION", returnContent=utils:createRefreshFunctionActionContent(true, translate.string("#__ACRONIS_BACKUP_PCT_BE_SETTINGS_ACTION_LINK_ACCOUNT_MESSAGE"), "SUCCESS"); }
 end
 
 function action_function_unlink_account(p)
@@ -873,7 +885,7 @@ function action_function_unlink_account(p)
 
   local utils = new("Utils");
 
-  return { returnCode="SUCCESSFUL", returnType="FUNCTION", returnContent=utils:createRefreshFunctionActionContent(true); }
+  return { returnCode="SUCCESSFUL", returnType="FUNCTION", returnContent=utils:createRefreshFunctionActionContent(true, translate.string("#__ACRONIS_BACKUP_PCT_BE_SETTINGS_ACTION_UNLINK_ACCOUNT_MESSAGE"), "SUCCESS"); }
 
 end
 
@@ -2204,9 +2216,14 @@ function getRandomString(length)
   return randomString;
 end
 
-function getScriptBlobUUID()
+function getLinuxScriptBlobUUID()
   local hasher = new ("FDLHashHelper");
   return hasher:getNamedUUID("_skyline/blobs/fco-acronis-setup-script.pl");
+end
+
+function getWindowExecutableBlobUUID()
+  local hasher = new ("FDLHashHelper");
+  return hasher:getNamedUUID("_skyline/blobs/FCOAcronisWinBackupSetup.exe");
 end
 
 --[[ End of Helper Functions ]]

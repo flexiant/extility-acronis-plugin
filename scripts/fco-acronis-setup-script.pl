@@ -81,10 +81,10 @@ if($setup){
 		system("sudo apt-get --yes --force-yes install wget rpm gcc make");
 	}
 	elsif ( index( $osType, "centos" ) != -1 ) {
-		system("sudo yum -y update");
+		system("sudo yum -y check-update");
 	
 		print "Installing necessery packages\n";
-		system("sudo yum -y install wget rpm gcc make");
+		system("sudo yum -y install wget kernel-devel rpm gcc make");
 	}
 	else {
 		print STDERR "Setup not supported by this operating system $osType\n";
@@ -92,11 +92,13 @@ if($setup){
 	}
 	
 	if(not defined($agent)){
+		my $defaultAgent = "/tmp/Backup_Client_for_Linux.bin";
+		
 		print "Downloading backup client agent\n";
-		system("sudo wget -O Backup_Client_for_Linux.bin 'http://dl.managed-protection.com/u/baas/Backup_Client_for_Linux_en-US_x86_64.bin'");
-		system("sudo chmod 755 Backup_Client_for_Linux.bin");
+		system("sudo wget -O $defaultAgent 'http://dl.managed-protection.com/u/baas/Backup_Client_for_Linux_en-US_x86_64.bin'");
+		system("sudo chmod 755 $defaultAgent");
 	
-		$agent = "Backup_Client_for_Linux.bin"; 
+		$agent = $defaultAgent; 
 	}
 }
 
@@ -124,16 +126,16 @@ if($install){
 	
 	if($register){
 		print "Installing backup agent and registering server with backup service\n";
-		system ("sudo ./$agent -a -C $acronisURL -g $acronisUsername -w $acronisPassword");
+		system ("sudo $agent -a -C $acronisURL -g $acronisUsername -w $acronisPassword");
 	}else{
 		print "Installing backup agent\n";
-		system ("sudo ./$agent -a");
+		system ("sudo $agent -a");
 	}
 }elsif($register){
 	print "Registering server with Backup Service\n";
 	system ("sudo /usr/lib/Acronis/BackupAndRecovery/AmsRegisterHelper register $acronisURL $acronisUsername $acronisPassword");
 }elsif($check){
-	print "Registering server with Backup Service\n";
+	print "Checking server registration with Backup Service\n";
 	system ("sudo /usr/lib/Acronis/BackupAndRecovery/AmsRegisterHelper check $acronisURL $acronisUsername $acronisPassword");
 }
 

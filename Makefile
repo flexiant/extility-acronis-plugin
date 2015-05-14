@@ -12,6 +12,7 @@ all:
 	/bin/cp -a translations ${EXTERNAL_FDL} 2>/dev/null && \
 	/bin/cp -a scripts ${JADE_UTILS} 2>/dev/null && \
 	/bin/cp -a scripts/fco-acronis-setup-script.pl ${BLOBS_FOLDER} 2>/dev/null && \
+	/bin/cp -a scripts/FCOAcronisWinBackupSetup.exe ${BLOBS_FOLDER} 2>/dev/null && \
 	/bin/true 
 	
 clean:

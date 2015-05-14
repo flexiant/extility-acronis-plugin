@@ -68,6 +68,11 @@ namespace FCOAcronisWinBackupSetup
 				}
 			}
 
+			string backupAgent = null;
+			if (args.Length > 1) {
+				backupAgent = args [1];
+			}
+
 			bool setup = false;
 			bool install = false;
 			bool register = false;
@@ -106,15 +111,15 @@ namespace FCOAcronisWinBackupSetup
 			}
 			Directory.CreateDirectory (tempDirectory);
 
-			string agentFile = Path.Combine (tempDirectory, "Backup_Client_for_Windows.exe");
+			string defaultAgentFile = Path.Combine (tempDirectory, "Backup_Client_for_Windows.exe");
 			string msiFile = Path.Combine (tempDirectory, "BackupClient.msi");
 
-			if (setup) {
+			if (setup && backupAgent == null) {
 
-				Console.WriteLine (String.Format ("Downloading the Backup Client for Windows to '{0}'", agentFile));
+				Console.WriteLine (String.Format ("Downloading the Backup Client for Windows to '{0}'", defaultAgentFile));
 				using (WebClient webClient = new WebClient ()) {
 					try {
-						webClient.DownloadFile ("http://dl.managed-protection.com/u/baas/Backup_Client_for_Windows_en-US.exe", agentFile);
+						webClient.DownloadFile ("http://dl.managed-protection.com/u/baas/Backup_Client_for_Windows_en-US.exe", defaultAgentFile);
 					} catch (Exception e) {
 						Console.WriteLine (String.Format ("Error when downloading client, please try again. {0}", e.Message));
 						return;
@@ -122,7 +127,7 @@ namespace FCOAcronisWinBackupSetup
 				}
 				Console.WriteLine ("Download Complete");
 
-				bool cont = unpackageBackupAgent (agentFile, tempDirectory);
+				bool cont = unpackageBackupAgent (defaultAgentFile, tempDirectory);
 				if (!cont) {
 					return;
 				}
@@ -130,24 +135,22 @@ namespace FCOAcronisWinBackupSetup
 			} else if(install) {
 
 				// If we do not download the agent, we must be supplied it. Either the .msi or the .exe it can be extracted from
-				if (args.Length > 1) {
-					agentFile = args[1];
-
-					if(File.Exists(agentFile)){
-						if (agentFile.EndsWith (".msi")) {
-							msiFile = agentFile;
-						} else {
-							bool cont = unpackageBackupAgent (agentFile, tempDirectory);
-							if (!cont) {
-								return;
-							}
-						}
-					}else{
-						Console.WriteLine ("Invalid file path");
-						return;
-					}
-				} else {
+				if (string.IsNullOrEmpty (backupAgent)) {
 					Console.WriteLine ("You cannot install the client without specifing either the .exe or .msi file");
+					return;
+				}
+
+				if(File.Exists(backupAgent)){
+					if (backupAgent.EndsWith (".msi")) {
+						msiFile = backupAgent;
+					} else {
+						bool cont = unpackageBackupAgent (backupAgent, tempDirectory);
+						if (!cont) {
+							return;
+						}
+					}
+				}else{
+					Console.WriteLine ("Invalid file path");
 					return;
 				}
 
