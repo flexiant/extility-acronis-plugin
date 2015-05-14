@@ -73,18 +73,25 @@ if($setup){
 	
 	my $osType = qx(python -mplatform);
 	$osType =~ s/^\s+|\s+$//g;
+	$osType = lc($osType);
 	
-	if ( index( $osType, "Ubuntu" ) != -1 ) {
+	if ( index( $osType, "ubuntu" ) != -1 ) {
 		system("sudo apt-get --yes --force-yes update");
 	
 		print "Installing necessery packages\n";
-		system("sudo apt-get --yes --force-yes install wget rpm gcc make");
+		system("sudo apt-get --yes --force-yes install curl wget rpm gcc make");
 	}
 	elsif ( index( $osType, "centos" ) != -1 ) {
 		system("sudo yum -y check-update");
 	
 		print "Installing necessery packages\n";
-		system("sudo yum -y install wget kernel-devel rpm gcc make");
+		system("sudo yum -y install wget curl kernel-devel rpm gcc make");
+	}
+	elsif ( index( $osType, "debian" ) != -1 ) {
+		system("sudo apt-get --yes --force-yes update");
+	
+		print "Installing necessery packages\n";
+		system("sudo apt-get --yes --force-yes install curl wget rpm gcc make");
 	}
 	else {
 		print STDERR "Setup not supported by this operating system $osType\n";
