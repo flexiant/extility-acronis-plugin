@@ -339,7 +339,7 @@ function acronis_server_billing(p)
     return { { units=0, description=translate.string("LBL_NO_CHARGE") } };
   end
 
-  units=chargeUnits * tonumber(measureSize) * (convert_mtype(chargeMeasureType,measureType)) * -1 * p.billingFactor;
+  units=chargeUnits * tonumber(measureSize) * (convert_mtype(measureType,chargeMeasureType)) * -1 * p.billingFactor;
 
   return { { units=units, description=translate.string("#__ACRONIS_BACKUP_BILLING_DESC_BACKUP_CHARGE", measureSize, translate.measureType(measureType)) } }
 end
@@ -713,8 +713,7 @@ function pre_server_metadata_update_trigger(p)
 
     local cloudInit = "bootcmd:\n";
     cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/fco-acronis-setup-script.pl\n";
-    -- TODO : get rid of this line after you have tested download works
-    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl details >> /tmp/fco-acronis-details.txt\n";
+    --cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl details >> /tmp/fco-acronis-details.txt\n";
     cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl all\n";
 
     local runtimeNode = xmlHelper:findNode(document, "CONFIG/meta/runtime");
