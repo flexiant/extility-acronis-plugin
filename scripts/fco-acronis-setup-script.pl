@@ -45,7 +45,15 @@ my $register = 0;
 my $details = 0;
 my $check = 0;
 
-if($action eq "all"){
+# cloudInit and setup options are called by the cloud-init generated from the plugin at server start
+if($action eq "cloudInit"){
+	$install = 1;
+	$register = 1;
+	
+	$agent = "/tmp/Backup_Client_for_Linux.bin";
+}elsif($action eq "setup"){
+	$setup = 1;
+}elsif($action eq "all"){
 	$setup = 1;
 	$install = 1;
 	$register = 1;

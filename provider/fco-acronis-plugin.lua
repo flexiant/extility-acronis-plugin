@@ -711,10 +711,17 @@ function pre_server_metadata_update_trigger(p)
     xmlHelper:addTextNode(document, acronisNode, "username", customerValues.acronisUsername);
     xmlHelper:addTextNode(document, acronisNode, "password", customerValues.acronisPassword);
 
-    local cloudInit = "bootcmd:\n";
+    local cloudInit = "";
+    --[[ 
+    -- This could enable it for Debian, but breaks Ubuntu
+    cloudInit = cloudInit .. "packages:\n";
+    cloudInit = cloudInit .. " - curl\n\n";
+    ]]
+    cloudInit = cloudInit .. "bootcmd:\n";
     cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/fco-acronis-setup-script.pl\n";
-    --cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl details >> /tmp/fco-acronis-details.txt\n";
-    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl all\n";
+    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl setup\n";
+    cloudInit = cloudInit .. "runcmd:\n";
+    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl cloudInit\n";
 
     local runtimeNode = xmlHelper:findNode(document, "CONFIG/meta/runtime");
     local systemNode = xmlHelper:findNode(runtimeNode, "system");
