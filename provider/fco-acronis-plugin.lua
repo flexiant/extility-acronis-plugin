@@ -719,9 +719,8 @@ function pre_server_metadata_update_trigger(p)
     ]]
     cloudInit = cloudInit .. "bootcmd:\n";
     cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/fco-acronis-setup-script.pl\n";
-    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl setup\n";
     cloudInit = cloudInit .. "runcmd:\n";
-    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl cloudInit\n";
+    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl all\n";
 
     local runtimeNode = xmlHelper:findNode(document, "CONFIG/meta/runtime");
     local systemNode = xmlHelper:findNode(runtimeNode, "system");
