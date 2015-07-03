@@ -39,6 +39,25 @@ if(not defined($action)){
 	$action = "all";
 }
 
+#Check if it has already downloaded and installed the client
+my $amsRegisterHelperFound = -f "/usr/lib/Acronis/BackupAndRecovery/AmsRegisterHelper";
+
+if($amsRegisterHelperFound){
+	if($action eq "all"){
+		print "Agent already installed\n";
+		$action = "register";
+	}
+}else{
+	if($action eq "register"){
+		print STDERR "Cannot register the machine as the agent is not installed correctly\n";
+		exit;
+	}
+	if($action eq "check"){
+		print STDERR "Cannot check that the machine is registered as the agent is not installed correctly\n";
+		exit;
+	}
+}
+
 my $setup = 0;
 my $install = 0;
 my $register = 0;
