@@ -2513,7 +2513,7 @@ end
 function postServerCreate(server)
   local billingEntityValues=getBillingEntityValues(server:getBillingEntityUUID());
   if(billingEntityValues.success == false) then
-    local syslog = new("syslog")
+    local syslog = new("syslog");
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
     syslog.syslog("LOG_ERR", "Acronis admin credentials not found");
     syslog.closelog();
@@ -2522,46 +2522,49 @@ function postServerCreate(server)
 
   local serverValues=getServerValues(server);
   if(serverValues.enabled) then
-
-    local customerValues=getCustomerValues(server:getCustomerUUID());
-    if(customerValues.success) then
-
-      local simplehttp=new("simplehttp");
-      local connection=simplehttp:newConnection({ enable_cookie=true, ssl_verify=true })
-
-      local loginResult=loginToAcronis(connection, billingEntityValues.serviceURL, billingEntityValues.username, billingEntityValues.password)
-      if(loginResult == nil or loginResult.url == nil) then
-        return { exitState="CONTINUE" }
-      end
-
-      local createUserAccount=createUserAccount(connection, loginResult.url, customerValues, billingEntityValues.password, billingEntityValues.groupID);
-      logout(connection, loginResult.url);
-
-      if(createUserAccount == nil) then
-        return { exitState="CONTINUE" }
-      end
-
-      local syslog = new("syslog")
-      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-      if(createUserAccount) then
-        syslog.syslog("LOG_INFO", "New user account created on Acronis");
-      else
-        syslog.syslog("LOG_INFO", "User account exists on Acronis");
-      end
-      syslog.closelog();
-
-      return { exitState="SUCCESS" }
-    else
-      local syslog = new("syslog")
-      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-      syslog.syslog("LOG_ERR", "Failed to find server customer "..server:getCustomerUUID());
-      syslog.closelog();
-      return { exitState="CONTINUE" }
-    end
-  else
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Backup is enabled for server "..server:getResourceName());
+    syslog.closelog();
+  else
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
     syslog.syslog("LOG_ERR", "Backup not enabled for server "..server:getResourceName());
+    syslog.closelog();
+  end
+
+  local customerValues=getCustomerValues(server:getCustomerUUID());
+  if(customerValues.success) then
+
+    local simplehttp=new("simplehttp");
+    local connection=simplehttp:newConnection({ enable_cookie=true, ssl_verify=true })
+
+    local loginResult=loginToAcronis(connection, billingEntityValues.serviceURL, billingEntityValues.username, billingEntityValues.password)
+    if(loginResult == nil or loginResult.url == nil) then
+      return { exitState="CONTINUE" }
+    end
+
+    local createUserAccount=createUserAccount(connection, loginResult.url, customerValues, billingEntityValues.password, billingEntityValues.groupID);
+    logout(connection, loginResult.url);
+
+    if(createUserAccount == nil) then
+      return { exitState="CONTINUE" }
+    end
+
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    if(createUserAccount) then
+      syslog.syslog("LOG_INFO", "New user account created on Acronis");
+    else
+      syslog.syslog("LOG_INFO", "User account exists on Acronis");
+    end
+    syslog.closelog();
+
+    return { exitState="SUCCESS" }
+  else
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Failed to find server customer "..server:getCustomerUUID());
     syslog.closelog();
     return { exitState="CONTINUE" }
   end
