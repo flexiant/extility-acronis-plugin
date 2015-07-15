@@ -391,7 +391,9 @@ function acronis_server_billing(p)
 
   units=chargeUnits * tonumber(measureSize) * (convert_mtype(measureType,chargeMeasureType)) * -1 * p.billingFactor;
 
-  return { { units=units, description=translate.string("#__ACRONIS_BACKUP_BILLING_DESC_BACKUP_CHARGE", measureSize, translate.measureType(measureType)) } }
+  local measureSizeString = new("Utils"):roundNumber(tonumber(measureSize), 5);
+
+  return { { units=units, description=translate.string("#__ACRONIS_BACKUP_BILLING_DESC_BACKUP_CHARGE", measureSizeString, translate.measureType(measureType)) } }
 end
 
 --[[ Measurement Functions ]]
@@ -484,9 +486,12 @@ function server_measurement_function(p)
   end
 
   if(acronisUsage > 0.0) then
+  
+    local usageString = new("Utils"):roundNumber(acronisUsage, 5);
+  
     local syslog = new("syslog");
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_INFO", "Acronis storage usage is: "..acronisUsage.." GB for server "..serverValues.ipAddress.."");
+    syslog.syslog("LOG_INFO", "Acronis storage usage is: "..usageString.." GB for server "..serverValues.ipAddress.."");
     syslog.closelog();
   end
 
@@ -694,9 +699,9 @@ function pre_server_metadata_update_trigger(p)
     cloudInit = cloudInit .. " - curl\n\n";
     ]]
     cloudInit = cloudInit .. "bootcmd:\n";
-    cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/fco-acronis-setup-script.pl\n";
+    cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/linux-acronis-setup-script.pl\n";
     cloudInit = cloudInit .. "runcmd:\n";
-    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl all\n";
+    cloudInit = cloudInit .. " - perl /tmp/linux-acronis-setup-script.pl all\n";
 
     local runtimeNode = xmlHelper:findNode(document, "CONFIG/meta/runtime");
     local systemNode = xmlHelper:findNode(runtimeNode, "system");
@@ -784,6 +789,27 @@ function pre_modify_server_trigger(p)
   end
   
   if(currentServer:getProductOfferUUID() == updatedServer:getProductOfferUUID()) then
+    if(doesProductOfferUseAcronis(adminAPI, updatedServer:getProductOfferUUID())) then
+    
+      local oldConfig = currentServer:getProviderValues("ACRONIS_BACKUP");
+      local oldRetention = oldConfig:get("retention");
+      local oldFrequency = oldConfig:get("frequency");
+      local oldPassword = oldConfig:get("password");
+      
+      local newConfig = updatedServer:getProviderValues("ACRONIS_BACKUP");
+      local newRetention = newConfig:get("retention");
+      local newFrequency = newConfig:get("frequency");
+      local newPassword = newConfig:get("password");
+      
+      if(oldRetention ~= newRetention or oldFrequency ~= newFrequency or oldPassword ~= newPassword) then
+      
+        -- Delete old BackupPlan
+        postServerDelete(currentServer);
+        -- Update password in provider data if required
+        preServerCreate(updatedServer);
+      end
+    end
+  
      return { exitState="CONTINUE" }
   end
   
@@ -810,11 +836,12 @@ function scheduled_trigger(p)
       api="TRIGGER",
       version=1,
       ref="acronis_scheduled_trigger",
-      name="",
-      description="",
+      name="Acronis Clean-up trigger",
+      description="A scheduled trigger that will clean up the backups and machines on acronis for deleted servers",
       triggerType="SCHEDULED",
       triggerOptions={"ANY"},
-      schedule={start={hour=23,minute=0,second=0},frequency={hours=24}}
+      -- TODO : debug uncomment--schedule={start={hour=23,minute=0,second=0},frequency={hours=24}}
+      schedule={frequency={seconds=300}}
     }
   end
   
@@ -876,7 +903,7 @@ function scheduled_trigger(p)
                       local cleanUp = true;
 
                       if(machine.lastBackup ~= nil) then
-                        -- lastBackup format is not consistent with normal formats, Z is show as +00:00 instead of +0000, We remove last : so the date is in correct format.
+                        -- lastBackup format is not consistent with our expected formats, Z is show as +00:00 instead of +0000, We remove last : so the date is in expected format.
                         local backupString = machine.lastBackup;
                         backupString = string.gsub(backupString:reverse(), ":", "", 1):reverse();
 
@@ -884,14 +911,13 @@ function scheduled_trigger(p)
 
                         local hoursDifference = ((((currentTime - lastBackup) / 1000) / 60) / 60);
                         if(hoursDifference < 24) then
-                          cleanUp = false;
+                          --TODO uncomment this line --cleanUp = false;
                         end
                       end
 
                       if (cleanUp) then
 
-                        -- Check if server is no longer use acronis PO
-
+                        -- Check if server has been deleted or is no longer using an acronis PO
                         searchFilter = new("SearchFilter");
                         searchFilter:addCondition(utils:createFilterCondition("productOffer.product.components.referenceField", "IS_EQUAL_TO", "ACRONIS_BACKUP_SERVER_SETTINGS"));
                         searchFilter:addCondition(utils:createFilterCondition("nics.ipAddresses.ipAddress", "IS_EQUAL_TO", machine.ipAddress));
@@ -908,18 +934,35 @@ function scheduled_trigger(p)
 
                         if(cleanUp)then
 
-                          local result = deleteMachine(connection, backupAccess.url, backupAccess.hostName, machine.id, false);
-                          
+                          -- TODO : remove debug == true
+                          local result = deleteBackups(connection, backupAccess.url, backupAccess.hostName, machine.id, true);
+
                           if(result) then
+                            result = deleteMachine(connection, backupAccess.url, backupAccess.hostName, machine.id, false);
+
                             local syslog = new("syslog")
                             syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-                            syslog.syslog("LOG_INFO", "Machine " ..machine.ipAddress.." has been removed");
+                            syslog.syslog("LOG_INFO", "Backups for machine " ..machine.ipAddress.." have been removed");
                             syslog.closelog();
+                          
+                            if(result) then
+                              local syslog = new("syslog")
+                              syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+                              syslog.syslog("LOG_INFO", "Machine " ..machine.ipAddress.." has been removed");
+                              syslog.closelog();
+                            else
+                              local syslog = new("syslog")
+                              syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+                              syslog.syslog("LOG_INFO", "Machine " ..machine.ipAddress.." failed to be removed");
+                              syslog.closelog();
+                            end
                           else
+                          
                             local syslog = new("syslog")
                             syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-                            syslog.syslog("LOG_INFO", "Machine " ..machine.ipAddress.." failed to be removed");
+                            syslog.syslog("LOG_INFO", "Backups for machine " ..machine.ipAddress.." failed to be removed");
                             syslog.closelog();
+                          
                           end
                         end
                       end
@@ -1032,7 +1075,7 @@ function action_function_sigin(p)
   local loginResult=nil;
   local apiResult=nil;
 
-  loginResult, apiResult=loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword);
+  loginResult, apiResult=loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, false);
   if(loginResult == nil) then
     if(apiResult == nil) then
       return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_SSO_FAILED") }
@@ -1183,6 +1226,22 @@ function action_function_display_details(p)
       value=serverValues.password
     });
   end
+  
+  table.insert(values, {
+    key="linuxScript",
+    name=translate.advanced("#__ACRONIS_BACKUP_X_SETUP_SCRIPT_NAME", "#__ACRONIS_BACKUP_OS_TYPE_LINUX"),
+    description=translate.advanced("#__ACRONIS_BACKUP_X_SETUP_SCRIPT_DESCRIPTION", "#__ACRONIS_BACKUP_OS_TYPE_LINUX"),
+    readOnly=true,
+    value=getBlobDownloadlink(billingEntityValues.cpURL, getLinuxScriptBlobUUID(), "linux-acronis-setup-script.pl")
+  });
+  
+  table.insert(values, {
+    key="windowsScript",
+    name=translate.advanced("#__ACRONIS_BACKUP_X_SETUP_SCRIPT_NAME", "#__ACRONIS_BACKUP_OS_TYPE_WINDOWS"),
+    description=translate.advanced("#__ACRONIS_BACKUP_X_SETUP_SCRIPT_DESCRIPTION", "#__ACRONIS_BACKUP_OS_TYPE_WINDOWS"),
+    readOnly=true,
+    value=getBlobDownloadlink(billingEntityValues.cpURL, getWindowExecutableBlobUUID(), "AcronisWinBackupSetup.exe")
+  });
 
   local utils = new("Utils");
   local returnContent = utils:createDisplayDialogueActionContent(values, translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_NAME"), translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_MESSAGE"), "FONT_ICON_CIRCLE_INFO");
@@ -1257,7 +1316,7 @@ function action_function_signin_webrestore(p)
   local webstoreConnectionDetails = nil;
   apiResult=nil;
 
-  webstoreConnectionDetails, apiResult=getWebRestoreConnectionDetails(connection, backupConnectionDetails.url, customerValues.acronisUsername, customerValues.acronisPassword, true);
+  webstoreConnectionDetails, apiResult=getWebRestoreConnectionDetails(connection, backupConnectionDetails.url, customerValues.acronisUsername, customerValues.acronisPassword, false);
   logout(connection, loginResult.url);
 
   if(webstoreConnectionDetails == nil) then
@@ -1287,10 +1346,10 @@ function action_download_setup_scripts(p)
 
   if(osType == "#__ACRONIS_BACKUP_OS_TYPE_LINUX") then
     blobUUID = getLinuxScriptBlobUUID();
-    filename = "fco-acronis-setup-script.pl";
+    filename = "linux-acronis-setup-script.pl";
   elseif(osType == "#__ACRONIS_BACKUP_OS_TYPE_WINDOWS") then
     blobUUID = getWindowExecutableBlobUUID();
-    filename = "FCOAcronisWinBackupSetup.exe";
+    filename = "AcronisWinBackupSetup.exe";
   end
   
   
@@ -1980,14 +2039,12 @@ function deleteMachine(connection, backupAccessURL, hostName, machineID, debug)
     return false;
   end
 
-  local json=new("JSON");
-
   local headers={};
   headers['Content-Type']="application/json; charset=UTF-8";
   headers['Accept']="application/json";
 
-   local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/machines/"..machineID, "DELETE", "", headers, debug);
-  --local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..hostName.."/machines/"..machineID, "DELETE", "", headers, debug);
+  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/machines/"..machineID, "DELETE", "", headers, debug);
+  --local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..backupAccess.hostName.."/machines/"..machineID, "DELETE", "", headers, debug);
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
@@ -1997,6 +2054,34 @@ function deleteMachine(connection, backupAccessURL, hostName, machineID, debug)
   end
 
   return true;
+end
+
+function deleteBackups(connection, backupAccessURL, hostName, machineID, debug)
+
+  if(backupAccessURL == nil or machineID == nil) then
+    return false;
+  end
+
+  local headers={};
+  headers['Content-Type']="application/json; charset=UTF-8";
+  headers['Accept']="application/json";
+  
+  local params = {};
+  params.machineId = machineID;
+  
+  -- TODO - need archive password ?
+
+  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/archive_operations/delete_backups", "POST", new("JSON"):encode(params), headers, debug);
+  if(apiResult.success == false) then
+    local syslog = new("syslog")
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.closelog();
+    return false, apiResult;
+  end
+
+  return true;
+
 end
 
 function createBackupPlan(connection, backupAccessURL, hostName, planName, machineID, backupRetention, backupFrequency, backupPassword, debug)
@@ -2284,6 +2369,7 @@ function getAcronisStorageUsage(connection, acronisURL, username, password, mach
   end
 
   local apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/api/ams/"..backupAccess.hostName.."/statistics/space_usage", "GET", "", headers, false);
+  --local apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/statistics/space_usage", "GET", "", headers, false);
   --local apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/"..backupAccess.hostName.."/statistics/space_usage", "GET", "", headers, false);
   if(apiResult.success == false) then
     local syslog = new("syslog")
@@ -2487,8 +2573,6 @@ function getWindowExecutableBlobUUID()
   return hasher:getNamedUUID("_skyline/blobs/FCOAcronisWinBackupSetup.exe");
 end
 
---[[ End of Helper Functions ]]
-
 function preServerCreate(server)
   local providerValues=server:getProviderValues("ACRONIS_BACKUP");
   
@@ -2608,7 +2692,7 @@ function postServerDelete(server)
   local backupPlanID = getBackupPlanID(connection, backupAccess.url, backupAccess.hostName, machine.id, false);
 
   if(backupPlanID ~= nil) then
-    local deleteResult = deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, backupPlanID, true);
+    local deleteResult = deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, backupPlanID, false);
     if(deleteResult) then
       local syslog = new("syslog")
       syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
@@ -2648,3 +2732,10 @@ function doesProductOfferUseAcronis(adminAPI, productOfferUUID)
 
   return false;
 end
+
+function getBlobDownloadlink(cpURL, blobUUID, filename)
+  -- Link for service details, not for download, download returns the headers for skyline to add correctly
+  return cpURL .. "/rest/open/current/resources/blob/" .. blobUUID .. "/download?headers=%7B%22Content-Disposition%22%3A%22inline%3B+filename%3D'" .. filename .. "'%22%2C+%22Content-Description%22%3A%22File+Transfer%22%7D";
+end
+
+--[[ End of Helper Functions ]]
