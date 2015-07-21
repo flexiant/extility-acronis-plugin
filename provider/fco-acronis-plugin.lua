@@ -54,7 +54,7 @@ function acronis_backup_provider()
       "post_server_state_change_trigger",
       "pre_create_server_trigger",
       "pre_modify_server_trigger",
-      "scheduled_trigger"
+      --"scheduled_trigger" -- Removed for 5.0.5, will be added back in for 5.0.6
     },
     resourceConfigs={
       {
@@ -962,34 +962,7 @@ function scheduled_trigger(p)
                             syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
                             syslog.syslog("LOG_INFO", "Backups for machine " ..machine.ipAddress.." have been removed");
                             syslog.closelog();
-
-                          else
-
-                            local syslog = new("syslog")
-                            syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-                            syslog.syslog("LOG_ERR", "Backups for machine " ..machine.ipAddress.." failed to be removed");
-                            syslog.closelog();
-
-                            local customerEmail = new("CustomerEmail");
-                            customerEmail:setEmailType(new("EmailType", "GENERAL_EMAIL"));
-                            customerEmail:getEmailSettingDetails():put(new("EmailVAR", "EMAIL_SUBJECT"), translate.string("#__ACRONIS_BACKUP_EMAIL_BACKUP_FAILED_SUBJECT", machine.ipAddress, customerValues.customerName, customerValues.uuid));
-                            customerEmail:getEmailSettingDetails():put(new("EmailVAR", "EMAIL_BODY"), translate.string("#__ACRONIS_BACKUP_EMAIL_BACKUP_FAILED_BODY", machine.ipAddress, customerValues.customerName, customerValues.uuid));
-                            customerEmail:getSendToEmail():add(billingEntityValues.email);
-                            customerEmail:setCustomerUUID(billingEntityValues.uuid);
-
-                            result = adminAPI:sendEmail(customerEmail);
-                            if(result == false) then
-                              cleanUp = false;
-
-                              local syslog = new("syslog")
-                              syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-                              syslog.syslog("LOG_ERR", "Failed to send email for machine " ..machine.ipAddress.." backup removal failure");
-                              syslog.closelog();
-                            end
-
-                          end
-
-                          if(cleanUp) then
+                            
                             result = deleteMachine(connection, backupAccess.url, backupAccess.hostName, machine.id, false);
 
                             if(result) then
@@ -1003,6 +976,14 @@ function scheduled_trigger(p)
                               syslog.syslog("LOG_ERR", "Machine " ..machine.ipAddress.." failed to be removed");
                               syslog.closelog();
                             end
+
+                          else
+
+                            local syslog = new("syslog")
+                            syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+                            syslog.syslog("LOG_ERR", "Backups for machine " ..machine.ipAddress.." failed to be removed");
+                            syslog.closelog();
+
                           end
                         end
                       end
