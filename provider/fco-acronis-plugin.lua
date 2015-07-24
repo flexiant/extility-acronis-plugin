@@ -482,7 +482,7 @@ function server_measurement_function(p)
 
     local customerValues=getCustomerValues(server:getCustomerUUID());
 
-    acronisUsage=getAcronisStorageUsage(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, machine.instanceID);
+     acronisUsage=getAcronisStorageUsage(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, machine.instanceID, false);
   end
 
   if(acronisUsage > 0.0) then
@@ -2070,13 +2070,19 @@ function deleteMachine(connection, backupAccessURL, hostName, machineID, debug)
   headers['Accept']="application/json";
 
   local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/machines/"..machineID, "DELETE", "", headers, debug);
-  --local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..backupAccess.hostName.."/machines/"..machineID, "DELETE", "", headers, debug);
   if(apiResult.success == false) then
-    local syslog = new("syslog")
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Delete machine failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
-    syslog.closelog();
-    return false, apiResult;
+  
+    if(tostring(apiResult.statusCode) == "404") then
+      apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..hostName.."/machines/"..machineID, "DELETE", "", headers, debug);
+    end
+    
+    if(apiResult.success == false) then
+      local syslog = new("syslog")
+      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+      syslog.syslog("LOG_ERR", "Delete machine failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
+      syslog.closelog();
+      return false, apiResult;
+    end
   end
 
   return true;
@@ -2376,7 +2382,7 @@ function getBackupPlanID(connection, backupAccessURL, hostName, machineID, debug
   return nil;
 end
 
-function getAcronisStorageUsage(connection, acronisURL, username, password, machineInstanceID)
+function getAcronisStorageUsage(connection, acronisURL, username, password, machineInstanceID, debug)
   local json=new("JSON")
 
   local headers={};
@@ -2389,27 +2395,36 @@ function getAcronisStorageUsage(connection, acronisURL, username, password, mach
     remember=true
   };
 
-  local loginResult=loginToAcronis(connection, acronisURL, username, password, false)
+  local loginResult=loginToAcronis(connection, acronisURL, username, password, debug)
   if(loginResult == nil or loginResult.url == nil) then
     return 0;
   end
 
 
-  local backupAccess=accessBackup(connection, loginResult.url, nil);
+  local backupAccess=accessBackup(connection, loginResult.url, nil, debug);
   if(backupAccess == nil) then
     logout(connection, loginResult.url);
     return 0;
   end
 
-  local apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/api/ams/"..backupAccess.hostName.."/statistics/space_usage", "GET", "", headers, false);
-  --local apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/statistics/space_usage", "GET", "", headers, false);
-  --local apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/"..backupAccess.hostName.."/statistics/space_usage", "GET", "", headers, false);
+  local apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/statistics/space_usage", "GET", "", headers, debug);
   if(apiResult.success == false) then
-    local syslog = new("syslog")
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Create space usage failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
-    syslog.closelog();
-    return 0;
+  
+    if(tostring(apiResult.statusCode) == "404") then
+      apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/"..backupAccess.hostName.."/statistics/space_usage", "GET", "", headers, debug);
+      
+      if(apiResult.success == false) then
+        apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/api/ams/"..backupAccess.hostName.."/statistics/space_usage", "GET", "", headers, debug);
+      end
+    end
+    
+    if(apiResult.success == false) then
+      local syslog = new("syslog")
+      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+      syslog.syslog("LOG_ERR", "Create space usage failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
+      syslog.closelog();
+      return 0;
+    end
   end
 
   local response=json:decode(apiResult.response);
@@ -2437,9 +2452,15 @@ function getWebRestoreConnectionDetails(connection, backupAccessURL, username, p
   headers['Accept']="application/json";
 
   local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/links/webrestore", "GET", "", headers, debug);
-  --local apiResult=makeAPICall(connection, backupAccessURL.."/api/links/webrestore", "GET", "", headers, debug);
   if(apiResult.success == false) then
-    return nil, apiResult;
+  
+    if(tostring(apiResult.statusCode) == "404") then
+      apiResult=makeAPICall(connection, backupAccessURL.."/api/links/webrestore", "GET", "", headers, debug);
+    end
+    
+    if(apiResult.success == false) then
+      return nil, apiResult;
+    end
   end
 
   local webRestoreURL = apiResult.response .. "/enterprise/login/handleLoginForm.htm?email="..username.."&password="..password.."&timeZoneOffset=-180";
