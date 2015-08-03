@@ -14,7 +14,7 @@ end
 
 function init()
 
-  local adminAPI = new("AdminAPI", "Current");
+  local adminAPI = new("AdminAPI", "5.0");
   local linuxBlobUUID = getLinuxScriptBlobUUID();
 
   local blob = adminAPI:getResource(linuxBlobUUID, false);
@@ -24,7 +24,7 @@ function init()
       adminAPI:modifyBlob(blob, nil)
     end
   end
-  
+
   local windowsBlobUUID = getWindowExecutableBlobUUID();
   blob = adminAPI:getResource(windowsBlobUUID, false);
   if(blob ~= nil) then
@@ -33,7 +33,7 @@ function init()
       adminAPI:modifyBlob(blob, nil)
     end
   end
-  
+
 end
 
 --[[ Configuration Provider ]]
@@ -47,7 +47,15 @@ function acronis_backup_provider()
     api="CONFIG_PROVIDER",
     version=1,
     measurementFunctions={"server_measurement_function"},
-    triggerFunctions={"post_job_state_change_trigger", "pre_server_metadata_update_trigger", "post_create_server_trigger", "post_server_state_change_trigger", "pre_create_server_trigger"},
+    triggerFunctions={
+      "post_job_state_change_trigger",
+      "pre_server_metadata_update_trigger",
+      "post_create_server_trigger",
+      "post_server_state_change_trigger",
+      "pre_create_server_trigger",
+      "pre_modify_server_trigger",
+      --"scheduled_trigger" -- Removed for 5.0.5, will be added back in for 5.0.6
+    },
     resourceConfigs={
       {
         associatedResourceType="BILLING_ENTITY",
@@ -184,6 +192,27 @@ function acronis_backup_provider()
                 returnType="DIALOGUE",
                 executionFunction="action_function_display_details",
                 order=2
+              },
+              {
+                key="download_setup",
+                name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DOWNLOAD_SETUP_NAME",
+                description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DOWNLOAD_SETUP_DESCRIPTION",
+                returnType="URL_POPUP",
+                executionFunction="action_download_setup_scripts",
+                order=3,
+                parameters={
+                  {
+                    key="osType",
+                    name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DOWNLOAD_SETUP_OS_TYPE_NAME",
+                    description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DOWNLOAD_SETUP_OS_TYPE_DESCRIPTION",
+                    validator={
+                      validatorType="ENUM",
+                      validateString="#__ACRONIS_BACKUP_OS_TYPE_LINUX,#__ACRONIS_BACKUP_OS_TYPE_WINDOWS"
+                    },
+                    required=true,
+                    defaultValue="#__ACRONIS_BACKUP_OS_TYPE_LINUX"
+                  }
+                }
               }
             }
           }
@@ -264,6 +293,27 @@ function acronis_backup_provider()
                 returnType="DIALOGUE",
                 executionFunction="action_function_display_details",
                 order=2
+              },
+              {
+                key="download_setup",
+                name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DOWNLOAD_SETUP_NAME",
+                description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DOWNLOAD_SETUP_DESCRIPTION",
+                returnType="URL_POPUP",
+                executionFunction="action_download_setup_scripts",
+                order=3,
+                parameters={
+                  {
+                    key="osType",
+                    name="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DOWNLOAD_SETUP_OS_TYPE_NAME",
+                    description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DOWNLOAD_SETUP_OS_TYPE_DESCRIPTION",
+                    validator={
+                      validatorType="ENUM",
+                      validateString="#__ACRONIS_BACKUP_OS_TYPE_LINUX,#__ACRONIS_BACKUP_OS_TYPE_WINDOWS"
+                    },
+                    required=true,
+                    defaultValue="#__ACRONIS_BACKUP_OS_TYPE_LINUX"
+                  }
+                }
               }
             }
           }
@@ -341,7 +391,9 @@ function acronis_server_billing(p)
 
   units=chargeUnits * tonumber(measureSize) * (convert_mtype(measureType,chargeMeasureType)) * -1 * p.billingFactor;
 
-  return { { units=units, description=translate.string("#__ACRONIS_BACKUP_BILLING_DESC_BACKUP_CHARGE", measureSize, translate.measureType(measureType)) } }
+  local measureSizeString = new("Utils"):roundNumber(tonumber(measureSize), 5);
+
+  return { { units=units, description=translate.string("#__ACRONIS_BACKUP_BILLING_DESC_BACKUP_CHARGE", measureSizeString, translate.measureType(measureType)) } }
 end
 
 --[[ Measurement Functions ]]
@@ -403,11 +455,9 @@ function server_measurement_function(p)
 
   if(serverValues.enabled) then
     -- Backup is enabled
-    local customerValues=getCustomerValues(server:getCustomerUUID());
 
     if(backupPlanID == nil) then
       -- Does not have backup plan
-
       local success = createBackupPlan(connection, backupAccess.url, backupAccess.hostName, "Backup-"..server:getCustomerName().."-"..serverValues.ipAddress, machine.id, serverValues.retention, serverValues.frequency, serverValues.password, false);
       if(success) then
         local syslog = new("syslog")
@@ -420,25 +470,28 @@ function server_measurement_function(p)
         syslog.syslog("LOG_ERR", "Failed to create backup plan");
         syslog.closelog();
       end
-
-      if(machine.lastBackup ~= nil) then
-        logout(connection, loginResult.url);
-        acronisUsage=getAcronisStorageUsage(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, machine.instanceID);
-      end
-    else
-      -- Has existing backup plan
-      logout(connection, loginResult.url);
-      acronisUsage=getAcronisStorageUsage(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, machine.instanceID);
     end
+
   elseif(backupPlanID ~= nil) then
     -- Backup is not enabled but we have a backup plan id, we need to delete it. We don't care about the result
     deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, backupPlanID)
   end
 
+  if(machine.lastBackup ~= nil) then
+    logout(connection, loginResult.url);
+
+    local customerValues=getCustomerValues(server:getCustomerUUID());
+
+     acronisUsage=getAcronisStorageUsage(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, machine.instanceID, false);
+  end
+
   if(acronisUsage > 0.0) then
+
+    local usageString = new("Utils"):roundNumber(acronisUsage, 5);
+
     local syslog = new("syslog");
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_INFO", "Acronis storage usage is: "..acronisUsage.." GB for server "..serverValues.ipAddress.."");
+    syslog.syslog("LOG_INFO", "Acronis storage usage is: "..usageString.." GB for server "..serverValues.ipAddress.."");
     syslog.closelog();
   end
 
@@ -453,8 +506,8 @@ function post_job_state_change_trigger(p)
   if(p == nil) then
     return{
       ref="acronis_delete_trigger",
-      name="Delete Acronis Account",
-      description="Delete the Acronis account after when the customer is delete",
+      name="Customer Job State Change Trigger",
+      description="Job state change trigger for customer create and delete",
       priority=0,
       triggerType="POST_JOB_STATE_CHANGE",
       triggerOptions={"SUCCESSFUL"},
@@ -537,7 +590,7 @@ function post_job_state_change_trigger(p)
       if(success == nil) then
         local syslog = new("syslog")
         syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-        syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+        syslog.syslog("LOG_ERR", "Delete user acccount failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
         syslog.closelog();
         return { returnCode="CONTINUE" }
       end
@@ -574,25 +627,8 @@ function pre_create_server_trigger(p)
     }
   end
 
-  local server=p.input;
+  preServerCreate(p.input);
 
-  local providerValues=server:getProviderValues("ACRONIS_BACKUP");
-  if(providerValues ~= nil) then
-    local passwordString = providerValues:get("password");
-    if(passwordString ~= nil) then
-
-      local serverData = new("Map");
-      serverData:put("encryptionPassword", passwordString);
-      dataStore:resetPrivateDataMap(server:getResourceUUID(), serverData);
-
-      local newPasswordString = "";
-      for i = 1, #passwordString, 1 do
-        newPasswordString = newPasswordString .. "*";
-      end
-
-      providerValues:put("password", newPasswordString);
-    end
-  end
   return { exitState="CONTINUE" }
 end
 
@@ -609,62 +645,7 @@ function post_create_server_trigger(p)
     }
   end
 
-  local server=p.input;
-
-  local billingEntityValues=getBillingEntityValues(server:getBillingEntityUUID());
-  if(billingEntityValues.success == false) then
-    local syslog = new("syslog")
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Acronis admin credentials not found");
-    syslog.closelog();
-    return { exitState="CONTINUE" }
-  end
-
-  local serverValues=getServerValues(server);
-  if(serverValues.enabled) then
-
-    local customerValues=getCustomerValues(server:getCustomerUUID());
-    if(customerValues.success) then
-
-      local simplehttp=new("simplehttp");
-      local connection=simplehttp:newConnection({ enable_cookie=true, ssl_verify=true })
-
-      local loginResult=loginToAcronis(connection, billingEntityValues.serviceURL, billingEntityValues.username, billingEntityValues.password)
-      if(loginResult == nil or loginResult.url == nil) then
-        return { exitState="CONTINUE" }
-      end
-
-      local createUserAccount=createUserAccount(connection, loginResult.url, customerValues, billingEntityValues.password, billingEntityValues.groupID);
-      logout(connection, loginResult.url);
-
-      if(createUserAccount == nil) then
-        return { exitState="CONTINUE" }
-      end
-
-      local syslog = new("syslog")
-      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-      if(createUserAccount) then
-        syslog.syslog("LOG_INFO", "New user account created on Acronis");
-      else
-        syslog.syslog("LOG_INFO", "User account exists on Acronis");
-      end
-      syslog.closelog();
-
-      return { exitState="SUCCESS" }
-    else
-      local syslog = new("syslog")
-      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-      syslog.syslog("LOG_ERR", "Failed to find server customer "..server:getCustomerUUID());
-      syslog.closelog();
-      return { exitState="CONTINUE" }
-    end
-  else
-    local syslog = new("syslog")
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Backup not enabled for server "..server:getResourceName());
-    syslog.closelog();
-    return { exitState="CONTINUE" }
-  end
+  postServerCreate(p.input);
 
   return { exitState="CONTINUE" }
 end
@@ -704,7 +685,7 @@ function pre_server_metadata_update_trigger(p)
 
     local scriptDownloadLink = billingEntityValues.cpURL .. "/rest/open/current/resources/blob/" ..getLinuxScriptBlobUUID() .. "/download";
     xmlHelper:addTextNode(document, acronisNode, "linux-download", scriptDownloadLink);
-    
+
     local windowsDownloadLink = billingEntityValues.cpURL .. "/rest/open/current/resources/blob/" .. getWindowExecutableBlobUUID() .. "/download";
     xmlHelper:addTextNode(document, acronisNode, "windows-download", windowsDownloadLink);
     xmlHelper:addTextNode(document, acronisNode, "url", billingEntityValues.serviceURL);
@@ -712,20 +693,20 @@ function pre_server_metadata_update_trigger(p)
     xmlHelper:addTextNode(document, acronisNode, "password", customerValues.acronisPassword);
 
     local cloudInit = "";
-    --[[ 
+    --[[
     -- This could enable it for Debian, but breaks Ubuntu
     cloudInit = cloudInit .. "packages:\n";
     cloudInit = cloudInit .. " - curl\n\n";
     ]]
     cloudInit = cloudInit .. "bootcmd:\n";
-    cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/fco-acronis-setup-script.pl\n";
+    cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/linux-acronis-setup-script.pl\n";
     cloudInit = cloudInit .. "runcmd:\n";
-    cloudInit = cloudInit .. " - perl /tmp/fco-acronis-setup-script.pl all\n";
+    cloudInit = cloudInit .. " - perl /tmp/linux-acronis-setup-script.pl all\n";
 
     local runtimeNode = xmlHelper:findNode(document, "CONFIG/meta/runtime");
     local systemNode = xmlHelper:findNode(runtimeNode, "system");
     local userdataNode = nil;
-    
+
     if(systemNode == nil) then
       systemNode = xmlHelper:addNode(document, runtimeNode, "system");
     else
@@ -734,7 +715,7 @@ function pre_server_metadata_update_trigger(p)
 
     local cData = "";
     local boundary = "runtimemetadataboundary";
-    
+
     if(userdataNode == nil) then
       cData = "Content-Type: multipart/mixed; boundary=\""..boundary.."\"\n";
       cData = cData.."MIME-Version: 1.0\n"
@@ -767,8 +748,8 @@ function post_server_state_change_trigger(p)
   if(p == nil) then
     return {
       ref="post_server_state_change_trigger",
-      name="",
-      description="",
+      name="Acronis Server State Change Trigger",
+      description="A Server State Change Trigger that focuses on when a server is put to DELETING state.",
       triggerType="POST_SERVER_STATE_CHANGE",
       triggerOptions={"DELETING"},
       api="TRIGGER",
@@ -776,60 +757,248 @@ function post_server_state_change_trigger(p)
     }
   end
 
-  local serverValues=getServerValues(p.input);
-  local billingEntityValues=getBillingEntityValues(p.input:getBillingEntityUUID());
-  if(billingEntityValues.success == false) then
-    local syslog = new("syslog")
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Acronis admin credentials not found");
-    syslog.closelog();
+  postServerDelete(p.input);
+
+  return { exitState="CONTINUE" }
+end
+
+function pre_modify_server_trigger(p)
+
+  if (p == nil) then
+    return {
+      ref="pre_modify_server_trigger",
+      name="Modify Acronis Server",
+      description="Pre Modify trigger for Servers that will clean-up acronis data if the PO was modified",
+      triggerType="PRE_MODIFY",
+      triggerOptions={ "SERVER" },
+      api="TRIGGER",
+      version=1
+    }
+  end
+
+  local adminAPI = new("AdminAPI", "5.0");
+
+  local updatedServer = p.input;
+  if(updatedServer == nil) then
     return { exitState="CONTINUE" }
   end
 
-  -- Server is deleted, doesn't need the private data map
-  dataStore:resetPrivateDataMap(serverValues.uuid, nil);
+  local currentServer = adminAPI:getResource(updatedServer:getResourceUUID(), true);
+  if(currentServer == nil) then
+    return { exitState="CONTINUE" }
+  end
+
+  if(currentServer:getProductOfferUUID() == updatedServer:getProductOfferUUID()) then
+    if(doesProductOfferUseAcronis(adminAPI, updatedServer:getProductOfferUUID())) then
+
+      local oldServerValues = getServerValues(currentServer);
+
+      local oldConfig = currentServer:getProviderValues("ACRONIS_BACKUP");
+      local oldRetention = oldConfig:get("retention");
+      local oldFrequency = oldConfig:get("frequency");
+      local oldPassword = oldServerValues.password;
+      if(oldPassword == nil) then
+        oldPassword = "";
+      end
+
+      local newConfig = updatedServer:getProviderValues("ACRONIS_BACKUP");
+      local newRetention = newConfig:get("retention");
+      local newFrequency = newConfig:get("frequency");
+      local newPassword = newConfig:get("password");
+      if(newPassword == nil) then
+        newPassword = "";
+      end
+
+      if(#oldPassword > 0 and #newPassword == #oldPassword and oldPassword ~= newPassword)then
+        -- Check if newPassword is the same as oldPassword or stars the same length as oldPassword
+        local newPasswordAsStars = "";
+        for i = 1, #oldPassword, 1 do
+          newPasswordAsStars = newPasswordAsStars .. "*";
+        end
+
+        if(newPassword == oldPassword or newPassword == newPasswordAsStars) then
+          newPassword = oldPassword;
+          newConfig:put("password", newPassword);
+        end
+      end
+
+      if(oldRetention ~= newRetention or oldFrequency ~= newFrequency or oldPassword ~= newPassword) then
+
+        -- Delete old BackupPlan
+        postServerDelete(currentServer);
+        -- Update password in provider data if required
+        preServerCreate(updatedServer);
+      end
+    end
+
+    return { exitState="CONTINUE" }
+  end
+
+  if(doesProductOfferUseAcronis(adminAPI, currentServer:getProductOfferUUID())) then
+    -- Changing from backup we need to delete any existing backup plans
+    postServerDelete(currentServer);
+  end
+
+  if(doesProductOfferUseAcronis(adminAPI, updatedServer:getProductOfferUUID())) then
+    -- Changing to backup we will need to add encryption password to datastore and create a backup account
+    preServerCreate(updatedServer);
+    postServerCreate(updatedServer);
+  else
+    -- If new PO is not backup we clear the backup information from providers
+    updatedServer:getProviderValues():remove("ACRONIS_BACKUP");
+  end
+
+  return { exitState="CONTINUE" }
+end
+
+function scheduled_trigger(p)
+  if(p == nil) then
+    return{
+      api="TRIGGER",
+      version=1,
+      ref="acronis_scheduled_trigger",
+      name="Acronis Clean-up trigger",
+      description="A scheduled trigger that will clean up the backups and machines on acronis for deleted servers",
+      triggerType="SCHEDULED",
+      triggerOptions={"ANY"},
+      schedule={start={hour=23,minute=0,second=0},frequency={hours=24}}
+    }
+  end
 
   local simplehttp=new("simplehttp");
-  local json=new("JSON")
 
-  local connection=simplehttp.newConnection({enable_cookie=true, ssl_verify=true });
+  local triggeredTime = p.input[1];
+  local repeatFrequency = p.input[2];
+  local currentTime = p.input[3];
 
-  local loginResult=loginToAcronis(connection, billingEntityValues.serviceURL, billingEntityValues.username, billingEntityValues.password);
-  if(loginResult == nil or loginResult.url == nil) then
-    return { exitState="CONTINUE" }
+  local adminAPI = new("AdminAPI", "5.0");
+  local utils = new("Utils");
+  local dateHelper = new("FDLDateHelper");
+
+  local searchFilter = new("SearchFilter");
+  searchFilter:addCondition(utils:createFilterCondition("resourceState", "IS_EQUAL_TO", "ACTIVE"));
+
+  local queryLimit = new("QueryLimit");
+  queryLimit:setLoadChildren(false);
+
+  local beIterator = adminAPI:runListQuery(searchFilter, queryLimit, "BILLING_ENTITY");
+
+  local connection = nil;
+
+  while(beIterator:hasNext()) do
+    local billingEntity = beIterator:next();
+
+    local billingEntityValues = getBillingEntityValues(billingEntity);
+    if(billingEntityValues.success) then
+
+      connection=simplehttp.newConnection({enable_cookie=true, ssl_verify=true });
+      local loginResult=loginToAcronis(connection, billingEntityValues.serviceURL, billingEntityValues.username, billingEntityValues.password);
+      if(loginResult ~= nil and loginResult.url ~= nil) then
+        local groupUsers=getGroupUsers(connection, loginResult.url, billingEntityValues.groupID, false);
+        logout(connection, loginResult.url);
+
+        if(groupUsers ~= nil) then
+          for i = 1, #groupUsers, 1 do
+            local user = groupUsers[i];
+
+            if(billingEntityValues.uuid == user.billingEntityUUID) then
+
+              local customerValues = getCustomerValues(user.customerUUID);
+
+              connection=simplehttp.newConnection({enable_cookie=true, ssl_verify=true });
+              loginResult = loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, false);
+              if(loginResult ~= nil and loginResult.url ~= nil) then
+
+                local backupAccess = accessBackup(connection, loginResult.url, "self", false);
+
+                -- Check if customer has valid acronis servers
+                if(backupAccess ~= nil) then
+
+                  local machines = getAllMachines(connection, backupAccess.url, backupAccess.hostName, false);
+                  if(machines ~= nil) then
+
+                    for j = 1, #machines, 1 do
+                      local machine = machines[j];
+
+                      local cleanUp = true;
+
+                      if(machine.lastBackup ~= nil) then
+                        -- lastBackup format is not consistent with our expected formats, Z is show as +00:00 instead of +0000, We remove last : so the date is in expected format.
+                        local backupString = machine.lastBackup;
+                        backupString = string.gsub(backupString:reverse(), ":", "", 1):reverse();
+
+                        local lastBackup = dateHelper:getTimestamp(backupString, "yyyy-MM-dd'T'HH:mm:ssZ");
+
+                        local hoursDifference = ((((currentTime - lastBackup) / 1000) / 60) / 60);
+                        if(hoursDifference < 24) then
+                        cleanUp = false;
+                        end
+                      end
+
+                      if (cleanUp) then
+
+                        -- Check if server has been deleted or is no longer using an acronis PO
+                        searchFilter = new("SearchFilter");
+                        searchFilter:addCondition(utils:createFilterCondition("productOffer.product.components.referenceField", "IS_EQUAL_TO", "ACRONIS_BACKUP_SERVER_SETTINGS"));
+                        searchFilter:addCondition(utils:createFilterCondition("nics.ipAddresses.ipAddress", "IS_EQUAL_TO", machine.ipAddress));
+                        searchFilter:addCondition(utils:createFilterCondition("customerUUID", "IS_EQUAL_TO", user.customerUUID));
+
+                        queryLimit = new("QueryLimit");
+                        queryLimit:setLoadChildren(false);
+                        queryLimit:setMaxRecords(1);
+
+                        local serverIterator = adminAPI:runListQuery(searchFilter, queryLimit, "SERVER");
+                        if(serverIterator:hasNext()) then
+                          cleanUp=false;
+                        end
+
+                        if(cleanUp)then
+
+                          local result = deleteBackups(connection, backupAccess.url, customerValues.acronisUsername, customerValues.acronisPassword, backupAccess.hostName, machine.subscriptionId, machine.id, false);
+
+                          if(result) then
+
+                            local syslog = new("syslog")
+                            syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+                            syslog.syslog("LOG_INFO", "Backups for machine " ..machine.ipAddress.." have been removed");
+                            syslog.closelog();
+                            
+                            result = deleteMachine(connection, backupAccess.url, backupAccess.hostName, machine.id, false);
+
+                            if(result) then
+                              local syslog = new("syslog")
+                              syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+                              syslog.syslog("LOG_INFO", "Machine " ..machine.ipAddress.." has been removed");
+                              syslog.closelog();
+                            else
+                              local syslog = new("syslog")
+                              syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+                              syslog.syslog("LOG_ERR", "Machine " ..machine.ipAddress.." failed to be removed");
+                              syslog.closelog();
+                            end
+
+                          else
+
+                            local syslog = new("syslog")
+                            syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+                            syslog.syslog("LOG_ERR", "Backups for machine " ..machine.ipAddress.." failed to be removed");
+                            syslog.closelog();
+
+                          end
+                        end
+                      end
+                    end
+                  end
+                end
+
+                logout(connection, loginResult.url, false);
+              end
+            end
+          end
+        end
+      end
+    end
   end
-
-  local backupAccess=accessBackup(connection, loginResult.url, billingEntityValues.groupID, false);
-  if(backupAccess == nil) then
-    logout(connection, loginResult.url);
-    return { exitState="CONTINUE" }
-  end
-
-  local machine=getMachine(connection, backupAccess.url, backupAccess.hostName, serverValues.ipAddress, false);
-  if(machine == nil) then
-    logout(connection, loginResult.url);
-    return { exitState="CONTINUE" }
-  end
-
-  local backupPlanID = getBackupPlanID(connection, backupAccess.url, backupAccess.hostName, machine.id, false);
-
-  if(backupPlanID ~= nil) then
-    deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, backupPlanID, false);
-    local syslog = new("syslog")
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_INFO", "Backup Plan " ..backupPlanID.." has been deleted");
-    syslog.closelog();
-  end
-
-  --[[
-  -- We do not want to delete the machine from Acronis, backups should persist after server deletion.
-  deleteMachine(connection, backupAccess.url, backupAccess.hostName, machine.id);
-  local syslog = new("syslog")
-  syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-  syslog.syslog("LOG_INFO", "Machine " ..serverValues.ipAddress.." has been removed");
-  syslog.closelog();
-  ]]
-  logout(connection, loginResult.url);
 
   return { exitState="SUCCESS" }
 end
@@ -845,7 +1014,7 @@ function action_function_link_account(p)
   local simplehttp=new("simplehttp");
   local connection=simplehttp:newConnection({ enable_cookie=true, ssl_verify=true })
 
-  loginResult, apiResult=loginToAcronis(connection, p.parameters.serviceURL, p.parameters.username, p.parameters.password);
+  loginResult, apiResult=loginToAcronis(connection, p.parameters.serviceURL, p.parameters.username, p.parameters.password, false);
 
   if(loginResult == nil) then
     if(apiResult == nil) then
@@ -863,13 +1032,14 @@ function action_function_link_account(p)
   dataStoreMap:put("acronisUsername", p.parameters.username);
   dataStoreMap:put("acronisPassword", p.parameters.password);
   dataStoreMap:put("acronisServiceURL", p.parameters.serviceURL);
+  dataStoreMap:put("acronisEmail", loginResult.user.email);
 
   dataStore:resetPrivateDataMap(p.resource:getResourceUUID(), dataStoreMap)
 
   -- Remove password as we do not want to store this in config values
   dataStoreMap:remove("acronisPassword");
 
-  local adminAPI=new("AdminAPI", "current");
+  local adminAPI=new("AdminAPI", "5.0");
   local providerValues = new("Map");
   providerValues:put("serviceURL", p.parameters.serviceURL);
   providerValues:put("username", p.parameters.username);
@@ -885,7 +1055,7 @@ function action_function_unlink_account(p)
 
   dataStore:resetPrivateDataMap(p.resource:getResourceUUID(), nil)
 
-  local adminAPI=new("AdminAPI", "current");
+  local adminAPI=new("AdminAPI", "5.0");
   adminAPI:updateConfigurationProviderValues(p.resource:getResourceUUID(), "ACRONIS_BACKUP", nil);
 
   local utils = new("Utils");
@@ -927,7 +1097,7 @@ function action_function_sigin(p)
   local loginResult=nil;
   local apiResult=nil;
 
-  loginResult, apiResult=loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword);
+  loginResult, apiResult=loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, false);
   if(loginResult == nil) then
     if(apiResult == nil) then
       return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_SSO_FAILED") }
@@ -1079,6 +1249,22 @@ function action_function_display_details(p)
     });
   end
 
+  table.insert(values, {
+    key="linuxScript",
+    name=translate.advanced("#__ACRONIS_BACKUP_X_SETUP_SCRIPT_NAME", "#__ACRONIS_BACKUP_OS_TYPE_LINUX"),
+    description=translate.advanced("#__ACRONIS_BACKUP_X_SETUP_SCRIPT_DESCRIPTION", "#__ACRONIS_BACKUP_OS_TYPE_LINUX"),
+    readOnly=true,
+    value=getBlobDownloadlink(billingEntityValues.cpURL, getLinuxScriptBlobUUID(), "linux-acronis-setup-script.pl")
+  });
+
+  table.insert(values, {
+    key="windowsScript",
+    name=translate.advanced("#__ACRONIS_BACKUP_X_SETUP_SCRIPT_NAME", "#__ACRONIS_BACKUP_OS_TYPE_WINDOWS"),
+    description=translate.advanced("#__ACRONIS_BACKUP_X_SETUP_SCRIPT_DESCRIPTION", "#__ACRONIS_BACKUP_OS_TYPE_WINDOWS"),
+    readOnly=true,
+    value=getBlobDownloadlink(billingEntityValues.cpURL, getWindowExecutableBlobUUID(), "AcronisWinBackupSetup.exe")
+  });
+
   local utils = new("Utils");
   local returnContent = utils:createDisplayDialogueActionContent(values, translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_NAME"), translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_MESSAGE"), "FONT_ICON_CIRCLE_INFO");
 
@@ -1134,7 +1320,7 @@ function action_function_signin_webrestore(p)
   local backupConnectionDetails = nil;
   apiResult=nil;
 
-  backupConnectionDetails, apiResult=accessBackup(connection, loginResult.url, "self");
+  backupConnectionDetails, apiResult=accessBackup(connection, loginResult.url, "self", false);
   logout(connection, loginResult.url);
 
   if(backupConnectionDetails == nil) then
@@ -1152,10 +1338,10 @@ function action_function_signin_webrestore(p)
   local webstoreConnectionDetails = nil;
   apiResult=nil;
 
-  webstoreConnectionDetails, apiResult=getWebRestoreConnectionDetails(connection, backupConnectionDetails.url, customerValues.acronisUsername, customerValues.acronisPassword);
+  webstoreConnectionDetails, apiResult=getWebRestoreConnectionDetails(connection, backupConnectionDetails.url, customerValues.acronisUsername, customerValues.acronisPassword, false);
   logout(connection, loginResult.url);
 
-  if(webstoreConnectionDetails == nil) then
+  if(webstoreConnectionDetails == nil or webstoreConnectionDetails.sso == nil) then
     if(apiResult == nil) then
       return { returnCode="FAILED", errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_SSO_FAILED") }
     else
@@ -1169,8 +1355,46 @@ function action_function_signin_webrestore(p)
 
   local utils=new("Utils");
 
-  return { returnCode="SUCCESSFUL", returnType="URL_POPUP", returnContent=utils:createURLActionContent("POST", webstoreConnectionDetails.url, nil) }
+  return { returnCode="SUCCESSFUL", returnType="URL_POPUP", returnContent=utils:createURLActionContent("POST", webstoreConnectionDetails.sso, nil) }
 
+end
+
+function action_download_setup_scripts(p)
+
+  local osType = p.parameters.osType;
+
+  local blobUUID = nil;
+  local filename = nil;
+
+  if(osType == "#__ACRONIS_BACKUP_OS_TYPE_LINUX") then
+    blobUUID = getLinuxScriptBlobUUID();
+    filename = "linux-acronis-setup-script.pl";
+  elseif(osType == "#__ACRONIS_BACKUP_OS_TYPE_WINDOWS") then
+    blobUUID = getWindowExecutableBlobUUID();
+    filename = "AcronisWinBackupSetup.exe";
+  end
+
+
+  local adminAPI = new("AdminAPI", "5.0");
+  local billingEntity = adminAPI:getResource(p.resource:getBillingEntityUUID(), false);
+  if(billingEntity == nil) then
+    local syslog = new("syslog")
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Server's billing entity could not be found");
+    syslog.closelog();
+    return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_SSO_FAILED") }
+  end
+
+  local url = billingEntity:getControlPanelURL() .. "/rest/open/current/resources/blob/" ..blobUUID .. "/download";
+
+  local params = {};
+  params.headers = {};
+  params.headers["Content-Description"] = "File Transfer";
+  params.headers["Content-Disposition"] = "inline; filename='".. filename .."'";
+
+  local utils = new("Utils");
+
+  return { returnCode="SUCCESSFUL", returnType="URL_POPUP", returnContent=utils:createURLActionContent("GET", url, params) }
 end
 
 --[[ End of Action Functions ]]
@@ -1231,11 +1455,12 @@ function getBillingEntityValues(billingEntity)
   local serviceURLString=nil;
   local success=false;
   local cpURLString=nil;
+  local acronisEmailString=nil;
 
   if(type(billingEntity) ~= "string") then
     beUUID=billingEntity:getResourceUUID();
   else
-    local adminAPI = new("AdminAPI", "Current");
+    local adminAPI = new("AdminAPI", "5.0");
     billingEntity = adminAPI:getResource(beUUID, false);
   end
 
@@ -1250,6 +1475,7 @@ function getBillingEntityValues(billingEntity)
     usernameString=billingData:get("acronisUsername")
     passwordString=billingData:get("acronisPassword")
     serviceURLString=billingData:get("acronisServiceURL");
+    acronisEmailString=billingData:get("acronisEmail");
 
     success=usernameString ~= nil and passwordString ~= nil and groupIDString ~= nil and serviceURLString ~= nil;
   end
@@ -1261,7 +1487,8 @@ function getBillingEntityValues(billingEntity)
     password=passwordString,
     serviceURL=serviceURLString,
     cpURL=cpURLString,
-    success=success
+    success=success,
+    email=acronisEmailString,
   }
 end
 
@@ -1273,7 +1500,7 @@ function getCustomerValues(customerUUID)
     customer=customerUUID;
     customerUUID=customerUUID:getResourceUUID()
   else
-    local adminAPI=new("AdminAPI", "current");
+    local adminAPI=new("AdminAPI", "5.0");
     customer=adminAPI:getResource(customerUUID, true);
   end
 
@@ -1334,6 +1561,7 @@ function getCustomerValues(customerUUID)
   local acronisEmail = beUUID.."."..customerUUID.."@acronis.flexiant.com";
   local acronisPassword = getRandomString(16);
   local acronisIDString="";
+  local exists = false;
 
   local customerData = dataStore:getPrivateDataMap(customerUUID);
   if(customerData ~= nil) then
@@ -1342,6 +1570,7 @@ function getCustomerValues(customerUUID)
     end
     if(customerData:containsKey("acronisID")) then
       acronisIDString = customerData:get("acronisID");
+      exists = acronisIDString ~= nil and #acronisIDString > 0;
     end
   end
 
@@ -1352,11 +1581,10 @@ function getCustomerValues(customerUUID)
 
   dataStore:resetPrivateDataMap(customerUUID, customerData);
 
-  local exists = acronisIDString ~= nil and #acronisIDString > 0;
-
   return {
     success=true,
     uuid=customer:getResourceUUID(),
+    customerName=customer:getResourceName(),
     beuuid=beUUID,
     address1=address1,
     address2=address2,
@@ -1481,9 +1709,9 @@ function makeAPICall(connection, url, method, params, headers, debug)
   }
 end
 
-function logout(connection, acronisURL)
+function logout(connection, acronisURL, debug)
 
-  makeAPICall(connection, acronisURL.."/api/1/logout", "GET", "", nil);
+  makeAPICall(connection, acronisURL.."/api/1/logout/", "POST", "", nil, debug);
 
 end
 
@@ -1499,11 +1727,14 @@ function loginToAcronis(connection, acronisURL, username, password, debug)
   headers['Content-Type']="application/json";
   headers['Accept']="application/json";
 
-  local apiResult=makeAPICall(connection, acronisURL.."/api/1/accounts/?login="..username, "GET", "", headers, debug);
+  local urlEncodedUsername = username;
+  urlEncodedUsername = string.gsub(username, "%+", "%%2B");
+
+  local apiResult=makeAPICall(connection, acronisURL.."/api/1/accounts/?login="..urlEncodedUsername, "GET", "", headers, debug);
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Initial login failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
@@ -1523,7 +1754,7 @@ function loginToAcronis(connection, acronisURL, username, password, debug)
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Login failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
@@ -1597,7 +1828,7 @@ function createUserAccount(connection, acronisURL, customerData, password, group
 
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Create backup user failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
@@ -1621,7 +1852,7 @@ function createUserAccount(connection, acronisURL, customerData, password, group
     if(apiResult.success == false) then
       local syslog = new("syslog")
       syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-      syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+      syslog.syslog("LOG_ERR", "Request activate account failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
       syslog.closelog();
       return nil, apiResult;
     end
@@ -1631,7 +1862,7 @@ function createUserAccount(connection, acronisURL, customerData, password, group
     if(apiResult.success == false) then
       local syslog = new("syslog")
       syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-      syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+      syslog.syslog("LOG_ERR", "Activate account failed : " ..  apiResult.statusCode .. " : " .. apiResult.response);
       syslog.closelog();
       return nil, apiResult;
     end
@@ -1657,7 +1888,7 @@ function deleteUserAccount(connection, acronisURL, groupID, accountID)
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Get backup account failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
@@ -1670,7 +1901,7 @@ function deleteUserAccount(connection, acronisURL, groupID, accountID)
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Disable backup account failed : " ..  apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
@@ -1682,7 +1913,7 @@ function deleteUserAccount(connection, acronisURL, groupID, accountID)
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Delete backup account failed : " ..  apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
@@ -1706,7 +1937,7 @@ function getBackupConnectionDetails(connection, acronisURL, groupID, debug)
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Get backup connection details failed : " ..  apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
@@ -1746,7 +1977,7 @@ function accessBackup(connection, acronisURL, groupID, debug)
   local backupConnectionDetails = nil;
   local apiResult = nil;
   backupConnectionDetails, apiResult = getBackupConnectionDetails(connection, acronisURL, groupID, debug);
-  if(backupConnectionDetails == nil) then
+  if(backupConnectionDetails == nil or backupConnectionDetails.url == nil) then
     return nil, apiResult;
   end
 
@@ -1754,7 +1985,7 @@ function accessBackup(connection, acronisURL, groupID, debug)
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Get backup connection failed : " ..  apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
@@ -1788,7 +2019,7 @@ function getMachine(connection, backupAccessURL, hostName, ipAddress, debug)
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Get subscription details failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
@@ -1798,7 +2029,7 @@ function getMachine(connection, backupAccessURL, hostName, ipAddress, debug)
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Get machine details failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
@@ -1811,8 +2042,8 @@ function getMachine(connection, backupAccessURL, hostName, ipAddress, debug)
 
   for i=1, #data, 1 do
     local item=data[i];
-    if(item.type == "machine" and item.ip ~= nil and item.ip[1] == ipAddress) then
 
+    if(item.type == "machine" and item.ip ~= nil and item.ip[1] == ipAddress) then
       return{
         id=item.id,
         instanceID=item.instance_id,
@@ -1824,28 +2055,72 @@ function getMachine(connection, backupAccessURL, hostName, ipAddress, debug)
   return nil
 end
 
-function deleteMachine(connection, backupAccessURL, hostName, ipAddress)
+function deleteMachine(connection, backupAccessURL, hostName, machineID, debug)
 
-  if(backupAccessURL == nil or hostName == nil or ipAddress == nil) then
-    return nil;
+  if(debug == nil) then
+    debug = false;
   end
 
-  local json=new("JSON");
+  if(backupAccessURL == nil or hostName == nil or machineID == nil) then
+    return false;
+  end
 
   local headers={};
   headers['Content-Type']="application/json; charset=UTF-8";
   headers['Accept']="application/json";
 
-  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..hostName.."/machines/"..ipAddress, "DELETE", "", headers, false);
+  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/machines/"..machineID, "DELETE", "", headers, debug);
   if(apiResult.success == false) then
-    local syslog = new("syslog")
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
-    syslog.closelog();
-    return nil, apiResult;
+  
+    if(tostring(apiResult.statusCode) == "404") then
+      apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..hostName.."/machines/"..machineID, "DELETE", "", headers, debug);
+    end
+    
+    if(apiResult.success == false) then
+      local syslog = new("syslog")
+      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+      syslog.syslog("LOG_ERR", "Delete machine failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
+      syslog.closelog();
+      return false, apiResult;
+    end
   end
 
   return true;
+end
+
+function deleteBackups(connection, backupAccessURL, username, password, hostName, subscriptionId, machineID, debug)
+
+  if(backupAccessURL == nil or machineID == nil) then
+    return false;
+  end
+
+  local headers={};
+  headers['Content-Type']="application/json; charset=UTF-8";
+  headers['Accept']="application/json";
+
+  local success = true;
+  local errorResult = nil;
+
+  local webRestoreURL = apiResult.url;
+
+  local params = {};
+  params.resourceId = machineID;
+  params.locationId = "Cloud";
+  params.subscriptionId = subscriptionId;
+
+  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/archive_operations/delete_backups", "POST", new("JSON"):encode(params), headers, debug);
+  if(apiResult.success == false) then
+    local syslog = new("syslog")
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Delete backups failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.closelog();
+
+    success = false;
+    errorResult = apiResult;
+  end
+
+  return success, errorResult;
+
 end
 
 function createBackupPlan(connection, backupAccessURL, hostName, planName, machineID, backupRetention, backupFrequency, backupPassword, debug)
@@ -2034,7 +2309,7 @@ function createBackupPlan(connection, backupAccessURL, hostName, planName, machi
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Create backup plan failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
@@ -2048,7 +2323,6 @@ function deleteBackupPlan(connection, backupAccessURL, hostName, backupPlanID, d
     debug = false;
   end
 
-  local json=new("JSON");
   local headers={};
   headers['Content-Type']="application/json; charset=UTF-8";
   headers['Accept']="application/json";
@@ -2057,14 +2331,13 @@ function deleteBackupPlan(connection, backupAccessURL, hostName, backupPlanID, d
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Delete backup plan failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
-    return nil, apiResult;
+    return false, apiResult;
   end
 
-  return json:decode(apiResult.response);
+  return true;
 end
-
 
 function getBackupPlanID(connection, backupAccessURL, hostName, machineID, debug)
 
@@ -2081,7 +2354,7 @@ function getBackupPlanID(connection, backupAccessURL, hostName, machineID, debug
   if(apiResult.success == false) then
     local syslog = new("syslog")
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Get backup plan failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
@@ -2109,7 +2382,7 @@ function getBackupPlanID(connection, backupAccessURL, hostName, machineID, debug
   return nil;
 end
 
-function getAcronisStorageUsage(connection, acronisURL, username, password, machineInstanceID)
+function getAcronisStorageUsage(connection, acronisURL, username, password, machineInstanceID, debug)
   local json=new("JSON")
 
   local headers={};
@@ -2122,25 +2395,36 @@ function getAcronisStorageUsage(connection, acronisURL, username, password, mach
     remember=true
   };
 
-  local loginResult=loginToAcronis(connection, acronisURL, username, password, false)
+  local loginResult=loginToAcronis(connection, acronisURL, username, password, debug)
   if(loginResult == nil or loginResult.url == nil) then
     return 0;
   end
 
 
-  local backupAccess=accessBackup(connection, loginResult.url, nil);
+  local backupAccess=accessBackup(connection, loginResult.url, nil, debug);
   if(backupAccess == nil) then
     logout(connection, loginResult.url);
     return 0;
   end
 
-  local apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/"..backupAccess.hostName.."/statistics/space_usage", "GET", "", headers, false);
+  local apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/statistics/space_usage", "GET", "", headers, debug);
   if(apiResult.success == false) then
-    local syslog = new("syslog")
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", apiResult.statusCode .. " : " .. apiResult.response);
-    syslog.closelog();
-    return 0;
+  
+    if(tostring(apiResult.statusCode) == "404") then
+      apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/"..backupAccess.hostName.."/statistics/space_usage", "GET", "", headers, debug);
+      
+      if(apiResult.success == false) then
+        apiResult=makeAPICall(connection, backupAccess.url.."/api/ams/api/ams/"..backupAccess.hostName.."/statistics/space_usage", "GET", "", headers, debug);
+      end
+    end
+    
+    if(apiResult.success == false) then
+      local syslog = new("syslog")
+      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+      syslog.syslog("LOG_ERR", "Create space usage failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
+      syslog.closelog();
+      return 0;
+    end
   end
 
   local response=json:decode(apiResult.response);
@@ -2161,7 +2445,88 @@ function getAcronisStorageUsage(connection, acronisURL, username, password, mach
   return 0;
 end
 
-function getWebRestoreConnectionDetails(connection, backupAccessURL, username, password)
+function getWebRestoreConnectionDetails(connection, backupAccessURL, username, password, debug)
+
+  local headers={};
+  headers['Content-Type']="application/json; charset=UTF-8";
+  headers['Accept']="application/json";
+
+  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/links/webrestore", "GET", "", headers, debug);
+  if(apiResult.success == false) then
+  
+    if(tostring(apiResult.statusCode) == "404") then
+      apiResult=makeAPICall(connection, backupAccessURL.."/api/links/webrestore", "GET", "", headers, debug);
+    end
+    
+    if(apiResult.success == false) then
+      return nil, apiResult;
+    end
+  end
+
+  local webRestoreURL = apiResult.response .. "/enterprise/login/handleLoginForm.htm?email="..username.."&password="..password.."&timeZoneOffset=-180";
+
+  return {
+    url = apiResult.response,
+    sso = webRestoreURL
+  };
+end
+
+function getGroupUsers(connection, acronisURL, groupID, debug)
+
+  if(debug == nil) then
+    debug = false;
+  end
+
+  local json=new("JSON");
+  local headers={};
+  headers['Content-Type']="application/json; charset=UTF-8";
+  headers['Accept']="application/json";
+
+  local apiResult=makeAPICall(connection, acronisURL.."/api/1/groups/"..groupID.."/users", "GET", "", headers, debug);
+  if(apiResult.success == false) then
+    return nil, apiResult;
+  end
+
+  local response=json:decode(apiResult.response);
+  if(response.items == nil) then
+    return nil;
+  end
+
+  local users = {};
+
+  for i = 1, #response.items, 1 do
+
+    local item = response.items[i];
+
+    local customerUUID = nil;
+    local beUUID = nil;
+
+    beUUID, customerUUID = string.match(item.login, "([^.]+).([^.]+)");
+
+    local user = {};
+    user.id = item.id;
+    user.customerUUID = customerUUID;
+    user.billingEntityUUID = beUUID;
+    user.customerName = item.firstname;
+    user.billingEntityName = item.lastname;
+
+    if(customerUUID ~= nil and beUUID ~= nil) then
+      table.insert(users, user);
+    end
+  end
+
+  return users;
+end
+
+function getAllMachines(connection, backupAccessURL, hostName, debug)
+
+  if(debug == nil) then
+    debug = false;
+  end
+
+  if(backupAccessURL == nil or hostName == nil) then
+    return nil;
+  end
 
   local json=new("JSON");
 
@@ -2169,16 +2534,51 @@ function getWebRestoreConnectionDetails(connection, backupAccessURL, username, p
   headers['Content-Type']="application/json; charset=UTF-8";
   headers['Accept']="application/json";
 
-  local apiResult=makeAPICall(connection, backupAccessURL.."/api/links/webrestore", "GET", "", headers, false);
+  local apiResult=makeAPICall(connection, backupAccessURL.."/api/subscriptions", "POST", "{}", headers, debug);
   if(apiResult.success == false) then
+    local syslog = new("syslog")
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Get subscription details failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.closelog();
     return nil, apiResult;
   end
+  local response=json:decode(apiResult.response);
 
-  local webRestoreURL = apiResult.response .. "/enterprise/login/handleLoginForm.htm?email="..username.."&password="..password.."&timeZoneOffset=-180";
+  local subscriptionId = response.id;
 
-  return {
-    url = webRestoreURL
-  };
+  apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/resources?subscriptionId=" .. subscriptionId .. "&recursive=5", "GET", "", headers, debug);
+  if(apiResult.success == false) then
+    local syslog = new("syslog")
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Get machine details failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.closelog();
+    return nil, apiResult;
+  end
+  response=json:decode(apiResult.response);
+
+  local data=response["data"]
+  if(data == nil) then
+    return nil;
+  end
+
+  local machines = {};
+
+  for i=1, #data, 1 do
+    local item=data[i];
+    if(item.type == "machine" and item.ip ~= nil) then
+
+      local machine = {};
+      machine.ipAddress = item.ip[1];
+      machine.instanceID = item.instance_id;
+      machine.lastBackup = item.lastBackup;
+      machine.id = item.id;
+      machine.subscriptionId = subscriptionId;
+
+      table.insert(machines, machine);
+    end
+  end
+
+  return machines
 end
 
 function cleanErrorResponse(input)
@@ -2229,6 +2629,171 @@ end
 function getWindowExecutableBlobUUID()
   local hasher = new ("FDLHashHelper");
   return hasher:getNamedUUID("_skyline/blobs/FCOAcronisWinBackupSetup.exe");
+end
+
+function preServerCreate(server)
+  local providerValues=server:getProviderValues("ACRONIS_BACKUP");
+
+  if(providerValues ~= nil) then
+    local passwordString = providerValues:get("password");
+    if(passwordString ~= nil) then
+
+      local serverData = new("Map");
+      serverData:put("encryptionPassword", passwordString);
+      dataStore:resetPrivateDataMap(server:getResourceUUID(), serverData);
+
+      local newPasswordString = "";
+      for i = 1, #passwordString, 1 do
+        newPasswordString = newPasswordString .. "*";
+      end
+
+      providerValues:put("password", newPasswordString);
+    end
+  end
+end
+
+function postServerCreate(server)
+  local billingEntityValues=getBillingEntityValues(server:getBillingEntityUUID());
+  if(billingEntityValues.success == false) then
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Acronis admin credentials not found");
+    syslog.closelog();
+    return { exitState="CONTINUE" }
+  end
+
+  local serverValues=getServerValues(server);
+  if(serverValues.enabled) then
+    local syslog = new("syslog")
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Backup is enabled for server "..server:getResourceName());
+    syslog.closelog();
+  else
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Backup not enabled for server "..server:getResourceName());
+    syslog.closelog();
+  end
+
+  local customerValues=getCustomerValues(server:getCustomerUUID());
+  if(customerValues.success) then
+
+    local simplehttp=new("simplehttp");
+    local connection=simplehttp:newConnection({ enable_cookie=true, ssl_verify=true })
+
+    local loginResult=loginToAcronis(connection, billingEntityValues.serviceURL, billingEntityValues.username, billingEntityValues.password)
+    if(loginResult == nil or loginResult.url == nil) then
+      return { exitState="CONTINUE" }
+    end
+
+    local createUserAccount=createUserAccount(connection, loginResult.url, customerValues, billingEntityValues.password, billingEntityValues.groupID);
+    logout(connection, loginResult.url);
+
+    if(createUserAccount == nil) then
+      return { exitState="CONTINUE" }
+    end
+
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    if(createUserAccount) then
+      syslog.syslog("LOG_INFO", "New user account created on Acronis");
+    else
+      syslog.syslog("LOG_INFO", "User account exists on Acronis");
+    end
+    syslog.closelog();
+
+    return { exitState="SUCCESS" }
+  else
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Failed to find server customer "..server:getCustomerUUID());
+    syslog.closelog();
+    return { exitState="CONTINUE" }
+  end
+end
+
+function postServerDelete(server)
+
+  local serverValues=getServerValues(server);
+  local billingEntityValues=getBillingEntityValues(server:getBillingEntityUUID());
+  if(billingEntityValues.success == false) then
+    local syslog = new("syslog")
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Acronis admin credentials not found");
+    syslog.closelog();
+    return { exitState="CONTINUE" }
+  end
+
+  -- Server is deleted, doesn't need the private data map
+  dataStore:resetPrivateDataMap(serverValues.uuid, nil);
+
+  local simplehttp=new("simplehttp");
+  local connection=simplehttp.newConnection({enable_cookie=true, ssl_verify=true });
+
+  local loginResult=loginToAcronis(connection, billingEntityValues.serviceURL, billingEntityValues.username, billingEntityValues.password, false);
+  if(loginResult == nil or loginResult.url == nil) then
+    return { exitState="CONTINUE" }
+  end
+
+  local backupAccess=accessBackup(connection, loginResult.url, billingEntityValues.groupID, false);
+  if(backupAccess == nil) then
+    logout(connection, loginResult.url);
+    return { exitState="CONTINUE" }
+  end
+
+  local machine=getMachine(connection, backupAccess.url, backupAccess.hostName, serverValues.ipAddress, false);
+  if(machine == nil) then
+    logout(connection, loginResult.url);
+    return { exitState="CONTINUE" }
+  end
+
+  local backupPlanID = getBackupPlanID(connection, backupAccess.url, backupAccess.hostName, machine.id, false);
+
+  if(backupPlanID ~= nil) then
+    local deleteResult = deleteBackupPlan(connection, backupAccess.url, backupAccess.hostName, backupPlanID, false);
+    if(deleteResult) then
+      local syslog = new("syslog")
+      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+      syslog.syslog("LOG_INFO", "Backup Plan " ..backupPlanID.." has been deleted");
+      syslog.closelog();
+    else
+      local syslog = new("syslog")
+      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+      syslog.syslog("LOG_INFO", "Backup Plan " ..backupPlanID.." was not deleted");
+      syslog.closelog();
+    end
+  end
+
+  logout(connection, loginResult.url);
+end
+
+function doesProductOfferUseAcronis(adminAPI, productOfferUUID)
+
+  if(adminAPI == nil or productOfferUUID == nil or #productOfferUUID == 0) then
+    return false;
+  end
+
+  local utils = new("Utils");
+
+  local searchFilter = new("SearchFilter");
+  searchFilter:addCondition(utils:createFilterCondition("product.components.referenceField", "IS_EQUAL_TO", "ACRONIS_BACKUP_SERVER_SETTINGS"));
+  searchFilter:addCondition(utils:createFilterCondition("resourceUUID", "IS_EQUAL_TO", productOfferUUID));
+
+  local queryLimit = new("QueryLimit");
+  queryLimit:setLoadChildren(false);
+  queryLimit:setMaxRecords(1);
+
+  local iterator = adminAPI:runListQuery(searchFilter, queryLimit, "PRODUCTOFFER");
+  if(iterator:hasNext()) then
+    return true;
+  end
+
+  return false;
+end
+
+function getBlobDownloadlink(cpURL, blobUUID, filename)
+  -- Link for service details, not for download, download returns the headers for skyline to add correctly
+  return cpURL .. "/rest/open/current/resources/blob/" .. blobUUID .. "/download?headers=%7B%22Content-Disposition%22%3A%22inline%3B+filename%3D'" .. filename .. "'%22%2C+%22Content-Description%22%3A%22File+Transfer%22%7D";
 end
 
 --[[ End of Helper Functions ]]
