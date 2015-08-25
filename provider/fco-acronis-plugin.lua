@@ -1210,7 +1210,7 @@ function action_function_display_details(p)
 
       local backupAccess=nil;
 
-      backupAccess = accessBackup(connection, loginResult.url, "self");
+      backupAccess = accessBackup(connection, loginResult.url, "self", false);
       if(backupAccess == nil) then
         logout(connection, loginResult.url);
       else
@@ -1304,7 +1304,7 @@ function action_function_signin_webrestore(p)
   local loginResult=nil;
   local apiResult=nil;
 
-  loginResult, apiResult=loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword);
+  loginResult, apiResult=loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, false);
   if(loginResult == nil) then
     if(apiResult == nil) then
       return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_SSO_FAILED") }
@@ -1944,9 +1944,9 @@ function getBackupConnectionDetails(connection, acronisURL, groupID, debug)
 
   local result=json:decode(apiResult.response);
 
-  local backupURL="";
-  local backupToken="";
-  if(result.url ~= nil) then
+  local backupURL=result.host;
+  local backupToken=result.token;
+  if(result.url ~= nil and (backupURL == nil or backupToken == nil)) then
     backupURL, backupToken=result.url:match("([^,]+)#access_token=([^,]+)");
   end
 
@@ -2462,11 +2462,22 @@ function getWebRestoreConnectionDetails(connection, backupAccessURL, username, p
       return nil, apiResult;
     end
   end
+  
+  local baseURL = apiResult.response;
+  
+  -- Need to make sure this is the base URL and not the path to the login or index page
+  local utils = new("Utils");
+  if(utils:stringEndsWith(baseURL, "/enterprise/login/login.htm")) then
+    baseURL = string.sub(baseURL, 1, string.len(baseURL) - string.len("/enterprise/login/login.htm"));
+  end
+  if(utils:stringEndsWith(baseURL, "/enterprise/index.htm")) then
+     baseURL = string.sub(baseURL, 1, string.len(baseURL) - string.len("/enterprise/index.htm"));
+  end
 
-  local webRestoreURL = apiResult.response .. "/enterprise/login/handleLoginForm.htm?email="..username.."&password="..password.."&timeZoneOffset=-180";
+  local webRestoreURL = baseURL .. "/enterprise/login/handleLoginForm.htm?email="..username.."&password="..password.."&timeZoneOffset=-180";
 
   return {
-    url = apiResult.response,
+    url = baseURL,
     sso = webRestoreURL
   };
 end
