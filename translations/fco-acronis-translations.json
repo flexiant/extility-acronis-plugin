@@ -60,6 +60,5 @@
   "#__ACRONIS_BACKUP_RETENTION_OPTION_2": "30 days", 
   "#__ACRONIS_BACKUP_X_SETUP_SCRIPT_DESCRIPTION": "The URL to download the {0} setup script.",
   "#__ACRONIS_BACKUP_X_SETUP_SCRIPT_NAME": "{0} Setup Script URL",
-  "ACRONIS_BACKUP": "Acronis Backup", 
-  "FCO_EXTENSION": "FCO Extension"
+  "ACRONIS_BACKUP": "Acronis Backup"
 }
