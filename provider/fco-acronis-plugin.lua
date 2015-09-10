@@ -279,7 +279,8 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_sigin",
-                order=0
+                order=0,
+                synchronous=true
               },
               {
                 key="login_webrestore",
@@ -2407,7 +2408,7 @@ function getAcronisStorageUsage(connection, acronisURL, username, password, mach
   end
 
 
-  local backupAccess=accessBackup(connection, loginResult.url, nil, debug);
+  local backupAccess=accessBackup(connection, loginResult.url, "self", debug);
   if(backupAccess == nil) then
     logout(connection, loginResult.url);
     return 0;
