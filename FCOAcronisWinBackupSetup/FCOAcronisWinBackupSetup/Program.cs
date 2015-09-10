@@ -38,6 +38,8 @@ namespace FCOAcronisWinBackupSetup
 {
 	class MainClass
 	{
+		private const string AGENT_DOWNLOAD_ADDRESS = "http://dl.managed-protection.com/u/baas/4.0/12.0.1299/Backup_Client_for_Windows_en-US.exe";
+
 		#region Enum.
 
 		/// <summary>
@@ -119,7 +121,7 @@ namespace FCOAcronisWinBackupSetup
 				Console.WriteLine (String.Format ("Downloading the Backup Client for Windows to '{0}'", defaultAgentFile));
 				using (WebClient webClient = new WebClient ()) {
 					try {
-						webClient.DownloadFile ("http://dl.managed-protection.com/u/baas/Backup_Client_for_Windows_en-US.exe", defaultAgentFile);
+						webClient.DownloadFile (AGENT_DOWNLOAD_ADDRESS, defaultAgentFile);
 					} catch (Exception e) {
 						Console.WriteLine (String.Format ("Error when downloading client, please try again. {0}", e.Message));
 						return;

@@ -175,7 +175,8 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_sigin",
-                order=0
+                order=0,
+                synchronous=true
               },
               {
                 key="login_webrestore",
@@ -183,7 +184,8 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_RESTORE_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_signin_webrestore",
-                order=1
+                order=1,
+                synchronous=true
               },
               {
                 key="display_details",
@@ -191,7 +193,8 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_DESCRIPTION",
                 returnType="DIALOGUE",
                 executionFunction="action_function_display_details",
-                order=2
+                order=2,
+                synchronous=true
               },
               {
                 key="download_setup",
@@ -284,7 +287,8 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_RESTORE_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_signin_webrestore",
-                order=1
+                order=1,
+                synchronous=true
               },
               {
                 key="display_details",
@@ -292,7 +296,8 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_DESCRIPTION",
                 returnType="DIALOGUE",
                 executionFunction="action_function_display_details",
-                order=2
+                order=2,
+                synchronous=true
               },
               {
                 key="download_setup",
@@ -700,6 +705,7 @@ function pre_server_metadata_update_trigger(p)
     ]]
     cloudInit = cloudInit .. "bootcmd:\n";
     cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/linux-acronis-setup-script.pl\n";
+    cloudInit = cloudInit .. " - sudo test -e /usr/lib/Acronis/BackupAndRecovery/AmsRegisterHelper && sudo perl /tmp/linux-acronis-setup-script.pl all || echo \"Backup first boot, will run setup script after boot complete.\" \n";
     cloudInit = cloudInit .. "runcmd:\n";
     cloudInit = cloudInit .. " - perl /tmp/linux-acronis-setup-script.pl all\n";
 

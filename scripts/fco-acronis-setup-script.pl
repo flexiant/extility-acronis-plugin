@@ -26,6 +26,10 @@
 use strict;
 use warnings;
 
+my $agentVersion = "12.0.1299";
+my $agentDownloadAddress = "http://dl.managed-protection.com/u/baas/4.0/12.0.1299/Backup_Agent_for_Linux_en-US_x86_64.bin";
+my $acronisVersionFile = "/var/spool/fco-acronis/version";
+
 my $acronisURL;
 my $acronisUsername;
 my $acronisPassword;
@@ -41,9 +45,24 @@ if(not defined($action)){
 my $amsRegisterHelperFound = -f "/usr/lib/Acronis/BackupAndRecovery/AmsRegisterHelper";
 
 if($amsRegisterHelperFound){
+	my $versionFileFound = -f $acronisVersionFile;
+	
 	if($action eq "all"){
-		print "Agent already installed\n";
-		$action = "register";
+		if(not $versionFileFound){
+			#No version file, this means that it is pre 12.0.1299
+		}else{
+			my $oldAgentVersion = "";
+			open(my $file, '<:encoding(UTF-8)', $acronisVersionFile);
+	        while (my $row = <$file>) {
+	                chomp $row;
+	                $oldAgentVersion = $oldAgentVersion . $row;
+	        }
+			
+			if($oldAgentVersion eq $agentVersion){
+				print "Agent already installed\n";
+				$action = "register";
+			}
+		}
 	}
 }else{
 	if($action eq "register"){
@@ -86,44 +105,55 @@ if($action eq "all"){
 }
 
 if($setup){	
-	print "Updating system\n";
-	
-	my $osType = qx(python -mplatform);
-	$osType =~ s/^\s+|\s+$//g;
-	$osType = lc($osType);
-	
-	if ( index( $osType, "ubuntu" ) != -1 ) {
-		system("sudo apt-get --yes --force-yes update");
-	
-		print "Installing necessery packages\n";
-		system("sudo apt-get --yes --force-yes install curl wget rpm gcc make");
-	}
-	elsif ( index( $osType, "centos" ) != -1 ) {
-		system("sudo yum -y check-update");
-	
-		print "Installing necessery packages\n";
-		system("sudo yum -y install wget curl kernel-devel rpm gcc make");
-	}
-	elsif ( index( $osType, "debian" ) != -1 ) {
-		system("sudo apt-get --yes --force-yes update");
-	
-		print "Installing necessery packages\n";
-		system("sudo apt-get --yes --force-yes install curl wget rpm gcc make");
-	}
-	else {
-		print STDERR "Setup not supported by this operating system $osType\n";
-		print STDERR "You may still be able to install the backup service but you must install any dependencies manually\n";
+	if(not $amsRegisterHelperFound){
+		print "Updating system\n";
+		# Don't update system or install packages if this is an upgrage of the agent
+		
+		my $osType = qx(python -mplatform);
+		$osType =~ s/^\s+|\s+$//g;
+		$osType = lc($osType);
+		
+		if ( index( $osType, "ubuntu" ) != -1 ) {
+			system("sudo apt-get --yes --force-yes update");
+		
+			print "Installing necessery packages\n";
+			system("sudo apt-get --yes --force-yes install curl wget rpm gcc make");
+		}
+		elsif ( index( $osType, "centos" ) != -1 ) {
+			system("sudo yum -y check-update");
+		
+			print "Installing necessery packages\n";
+			system("sudo yum -y install wget curl kernel-devel rpm gcc make");
+		}
+		elsif ( index( $osType, "debian" ) != -1 ) {
+			system("sudo apt-get --yes --force-yes update");
+		
+			print "Installing necessery packages\n";
+			system("sudo apt-get --yes --force-yes install curl wget rpm gcc make");
+		}
+		else {
+			print STDERR "Setup not supported by this operating system $osType\n";
+			print STDERR "You may still be able to install the backup service but you must install any dependencies manually\n";
+		}
+	}else{
+		# Here we can install any new packages that are needed for the upgraded agent
+		# Version 11.9.215 - Original agent version
+		# Version 12.0.1299 - No new packages required.
+		
 	}
 	
 	if(not defined($agent)){
 		my $defaultAgent = "/tmp/Backup_Client_for_Linux.bin";
 		
 		print "Downloading backup client agent\n";
-		system("sudo wget -O $defaultAgent 'http://dl.managed-protection.com/u/baas/Backup_Client_for_Linux_en-US_x86_64.bin'");
+		system("sudo wget -O $defaultAgent '$agentDownloadAddress'");
 		system("sudo chmod 755 $defaultAgent");
 	
 		$agent = $defaultAgent; 
 	}
+	
+	system("sudo mkdir /var/spool/fco-acronis");
+	system("$agent -v | sudo tee $acronisVersionFile");
 }
 
 if($register or $details or $check){
