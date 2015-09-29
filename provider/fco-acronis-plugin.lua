@@ -175,7 +175,8 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_sigin",
-                order=0
+                order=0,
+                synchronous=true
               },
               {
                 key="login_webrestore",
@@ -183,7 +184,8 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_RESTORE_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_signin_webrestore",
-                order=1
+                order=1,
+                synchronous=true
               },
               {
                 key="display_details",
@@ -191,7 +193,8 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_DESCRIPTION",
                 returnType="DIALOGUE",
                 executionFunction="action_function_display_details",
-                order=2
+                order=2,
+                synchronous=true
               },
               {
                 key="download_setup",
@@ -276,7 +279,8 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_ACCOUNT_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_sigin",
-                order=0
+                order=0,
+                synchronous=true
               },
               {
                 key="login_webrestore",
@@ -284,7 +288,8 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_LOGIN_RESTORE_DESCRIPTION",
                 returnType="URL_POPUP",
                 executionFunction="action_function_signin_webrestore",
-                order=1
+                order=1,
+                synchronous=true
               },
               {
                 key="display_details",
@@ -292,7 +297,8 @@ function acronis_backup_provider()
                 description="#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_DESCRIPTION",
                 returnType="DIALOGUE",
                 executionFunction="action_function_display_details",
-                order=2
+                order=2,
+                synchronous=true
               },
               {
                 key="download_setup",
@@ -700,6 +706,7 @@ function pre_server_metadata_update_trigger(p)
     ]]
     cloudInit = cloudInit .. "bootcmd:\n";
     cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/linux-acronis-setup-script.pl\n";
+    cloudInit = cloudInit .. " - sudo test -e /usr/lib/Acronis/BackupAndRecovery/AmsRegisterHelper && sudo perl /tmp/linux-acronis-setup-script.pl all || echo \"Backup first boot, will run setup script after boot complete.\" \n";
     cloudInit = cloudInit .. "runcmd:\n";
     cloudInit = cloudInit .. " - perl /tmp/linux-acronis-setup-script.pl all\n";
 
@@ -1210,7 +1217,7 @@ function action_function_display_details(p)
 
       local backupAccess=nil;
 
-      backupAccess = accessBackup(connection, loginResult.url, "self");
+      backupAccess = accessBackup(connection, loginResult.url, "self", false);
       if(backupAccess == nil) then
         logout(connection, loginResult.url);
       else
@@ -1304,7 +1311,7 @@ function action_function_signin_webrestore(p)
   local loginResult=nil;
   local apiResult=nil;
 
-  loginResult, apiResult=loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword);
+  loginResult, apiResult=loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, false);
   if(loginResult == nil) then
     if(apiResult == nil) then
       return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_MESSAGE_SSO_FAILED") }
@@ -1944,9 +1951,9 @@ function getBackupConnectionDetails(connection, acronisURL, groupID, debug)
 
   local result=json:decode(apiResult.response);
 
-  local backupURL="";
-  local backupToken="";
-  if(result.url ~= nil) then
+  local backupURL=result.host;
+  local backupToken=result.token;
+  if(result.url ~= nil and (backupURL == nil or backupToken == nil)) then
     backupURL, backupToken=result.url:match("([^,]+)#access_token=([^,]+)");
   end
 
@@ -2401,7 +2408,7 @@ function getAcronisStorageUsage(connection, acronisURL, username, password, mach
   end
 
 
-  local backupAccess=accessBackup(connection, loginResult.url, nil, debug);
+  local backupAccess=accessBackup(connection, loginResult.url, "self", debug);
   if(backupAccess == nil) then
     logout(connection, loginResult.url);
     return 0;
@@ -2462,11 +2469,22 @@ function getWebRestoreConnectionDetails(connection, backupAccessURL, username, p
       return nil, apiResult;
     end
   end
+  
+  local baseURL = apiResult.response;
+  
+  -- Need to make sure this is the base URL and not the path to the login or index page
+  local utils = new("Utils");
+  if(utils:stringEndsWith(baseURL, "/enterprise/login/login.htm")) then
+    baseURL = string.sub(baseURL, 1, string.len(baseURL) - string.len("/enterprise/login/login.htm"));
+  end
+  if(utils:stringEndsWith(baseURL, "/enterprise/index.htm")) then
+     baseURL = string.sub(baseURL, 1, string.len(baseURL) - string.len("/enterprise/index.htm"));
+  end
 
-  local webRestoreURL = apiResult.response .. "/enterprise/login/handleLoginForm.htm?email="..username.."&password="..password.."&timeZoneOffset=-180";
+  local webRestoreURL = baseURL .. "/enterprise/login/handleLoginForm.htm?email="..username.."&password="..password.."&timeZoneOffset=-180";
 
   return {
-    url = apiResult.response,
+    url = baseURL,
     sso = webRestoreURL
   };
 end
