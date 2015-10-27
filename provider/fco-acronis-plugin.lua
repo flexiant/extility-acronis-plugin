@@ -1454,6 +1454,12 @@ end
 
 function getBillingEntityValues(billingEntity)
 
+  if(billingEntity == nil) then
+    return{
+      success=false
+    }
+  end
+
   local beUUID=billingEntity;
 
   local groupIDString=nil;
