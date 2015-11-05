@@ -709,10 +709,10 @@ function pre_server_metadata_update_trigger(p)
     cloudInit = cloudInit .. " - curl\n\n";
     ]]
     cloudInit = cloudInit .. "bootcmd:\n";
-    cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/linux-acronis-setup-script.pl\n";
-    cloudInit = cloudInit .. " - sudo test -e /usr/lib/Acronis/BackupAndRecovery/AmsRegisterHelper && sudo perl /tmp/linux-acronis-setup-script.pl all || echo \"Backup first boot, will run setup script after boot complete.\" \n";
+    cloudInit = cloudInit .. " - curl -k -X GET " .. scriptDownloadLink .. " >> /tmp/linux-backup-setup-script.pl\n";
+    cloudInit = cloudInit .. " - sudo test -e /usr/lib/Acronis/BackupAndRecovery/AmsRegisterHelper && sudo perl /tmp/linux-backup-setup-script.pl all || echo \"Backup first boot, will run setup script after boot complete.\" \n";
     cloudInit = cloudInit .. "runcmd:\n";
-    cloudInit = cloudInit .. " - perl /tmp/linux-acronis-setup-script.pl all\n";
+    cloudInit = cloudInit .. " - perl /tmp/linux-backup-setup-script.pl all\n";
 
     local runtimeNode = xmlHelper:findNode(document, "CONFIG/meta/runtime");
     local systemNode = xmlHelper:findNode(runtimeNode, "system");
@@ -741,7 +741,7 @@ function pre_server_metadata_update_trigger(p)
     cData = cData.."Content-Type: text/cloud-config; charset=\"us-ascii\"\n"
     cData = cData.."MIME-Version: 1.0\n"
     cData = cData.."Content-Transfer-Encoding: 7bit\n"
-    cData = cData.."Content-Disposition: attachment; filename=\"fco-acronis.fake\"\n"
+    cData = cData.."Content-Disposition: attachment; filename=\"fco-backup.fake\"\n"
     cData = cData.."\n"
 
     cData = cData..cloudInit
@@ -973,7 +973,6 @@ function scheduled_trigger(p)
                         local debug = true;
 
                         if(cleanUp)then
-
                           local deleteMachine = false;
 
                           if(hasBackups) then
@@ -1396,10 +1395,10 @@ function action_download_setup_scripts(p)
 
   if(osType == "#__ACRONIS_BACKUP_OS_TYPE_LINUX") then
     blobUUID = getLinuxScriptBlobUUID();
-    filename = "linux-acronis-setup-script.pl";
+    filename = "linux-backup-setup-script.pl";
   elseif(osType == "#__ACRONIS_BACKUP_OS_TYPE_WINDOWS") then
     blobUUID = getWindowExecutableBlobUUID();
-    filename = "AcronisWinBackupSetup.exe";
+    filename = "WindowsBackupSetup.exe";
   end
 
 
@@ -1981,9 +1980,6 @@ function getBackupConnectionDetails(connection, acronisURL, groupID, debug)
   local backupURL=result.host;
   local backupToken=result.token;
   if(result.url ~= nil and (backupURL == nil or backupToken == nil)) then
-    print("DEBUG", "backupURL", backupURL)
-    print("DEBUG", "backupToken", backupToken)
-  
     backupURL, backupToken=result.url:match("([^,]+)#access_token=([^,]+)");
   end
 
@@ -2146,20 +2142,15 @@ function deleteBackups(connection, backupAccessURL, username, password, hostName
   local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/archive_operations/delete_backups", "POST", new("JSON"):encode(params), headers, debug);
   if(apiResult.success == false) then
     
-    if(tostring(apiResult.statusCode) == "404") then
-      -- TODO : needs to return successful if errors because there are no backups (need error code, most likly 404, knowing acronis it wont be)
-      success = true;
-    else
-  
-      local syslog = new("syslog");
+    -- TODO : would be successful if there were no backups to start with as well, need to confirm what that error code is
+    
+    local syslog = new("syslog");
       syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
       syslog.syslog("LOG_ERR", "Delete backups failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
       syslog.closelog();
   
       success = false;
       errorResult = apiResult;
-      
-    end
   end
 
   return success, errorResult;
