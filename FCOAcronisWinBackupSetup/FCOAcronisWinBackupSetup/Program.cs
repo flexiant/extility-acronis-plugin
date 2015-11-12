@@ -75,6 +75,8 @@ namespace FCOAcronisWinBackupSetup
 				backupAgent = args [1];
 			}
 
+			bool clean = true;
+
 			bool setup = false;
 			bool install = false;
 			bool register = false;
@@ -114,7 +116,7 @@ namespace FCOAcronisWinBackupSetup
 			Directory.CreateDirectory (tempDirectory);
 
 			string defaultAgentFile = Path.Combine (tempDirectory, "Backup_Client_for_Windows.exe");
-			string msiFile = Path.Combine (tempDirectory, "BackupClient.msi");
+			string msiFile = Path.Combine (tempDirectory, "BackupClient64.msi");
 
 			if (setup && backupAgent == null) {
 
@@ -187,6 +189,10 @@ namespace FCOAcronisWinBackupSetup
 				FileStream msiFileStream = File.Create (msiLog);
 				msiFileStream.Close ();
 
+				if (!File.Exists (msiFile)) {
+					msiFile = Path.Combine (tempDirectory, "BackupClient.msi");
+				}
+
 				string[] formatArgs = new string[register ? 5 : 2];
 				formatArgs [0] = msiFile;
 				formatArgs [1] = msiLog;
@@ -211,7 +217,7 @@ namespace FCOAcronisWinBackupSetup
 					                          "MMS_MUST_BE_REGISTERED=0", 
 					                          formatArgs);
 
-				invokeCommand ("msiexec", installArguments);
+				clean = invokeCommand ("msiexec", installArguments);
 			} else if (register) {
 
 				Console.WriteLine ("Registering machine with backup service");
@@ -262,8 +268,10 @@ namespace FCOAcronisWinBackupSetup
 
 				Console.WriteLine ("Complete");
 			}
-				
-			Directory.Delete (tempDirectory, true);
+
+			if (clean) {
+				Directory.Delete (tempDirectory, true);
+			}
 			Console.WriteLine ("Complete");
 		}
 
@@ -332,7 +340,7 @@ namespace FCOAcronisWinBackupSetup
 			}
 		}
 
-		private static void invokeCommand(string file, string arguments){
+		private static bool invokeCommand(string file, string arguments){
 			ProcessStartInfo processStartInfo = new ProcessStartInfo (file, arguments);
 			processStartInfo.RedirectStandardOutput = true;
 			processStartInfo.RedirectStandardError = true;
@@ -360,7 +368,10 @@ namespace FCOAcronisWinBackupSetup
 			{
 				Console.WriteLine("The following error was detected:");
 				Console.WriteLine(error);
+				return false;
 			}
+
+			return true;
 		}
 
 		#endregion
