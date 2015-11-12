@@ -14,25 +14,35 @@ end
 
 function init()
 
-  local adminAPI = new("AdminAPI", "5.0");
-  local linuxBlobUUID = getLinuxScriptBlobUUID();
+  local subJobs = {};
 
+  local adminAPI = new("AdminAPI", "5.0");
+  
+  local linuxBlobUUID = getLinuxScriptBlobUUID();
   local blob = adminAPI:getResource(linuxBlobUUID, false);
   if(blob ~= nil) then
     if(blob:isPublicResource() == false) then
       blob:setPublicResource(true)
-      adminAPI:modifyBlob(blob, nil)
+      local job = adminAPI:modifyBlob(blob, nil)
+      if(job ~= nil) then
+        table.insert(subJobs, job:getResourceUUID());
+      end
     end
   end
 
   local windowsBlobUUID = getWindowExecutableBlobUUID();
-  blob = adminAPI:getResource(windowsBlobUUID, false);
+  local blob = adminAPI:getResource(windowsBlobUUID, false);
   if(blob ~= nil) then
     if(blob:isPublicResource() == false) then
       blob:setPublicResource(true)
-      adminAPI:modifyBlob(blob, nil)
+      local job = adminAPI:modifyBlob(blob, nil)
+      if(job ~= nil) then
+        table.insert(subJobs, job:getResourceUUID());
+      end
     end
   end
+
+  return { jobs=subJobs }
 
 end
 
@@ -54,7 +64,7 @@ function acronis_backup_provider()
       "post_server_state_change_trigger",
       "pre_create_server_trigger",
       "pre_modify_server_trigger",
-      "scheduled_trigger"
+      "scheduled_trigger" 
     },
     resourceConfigs={
       {
@@ -1709,7 +1719,7 @@ function makeAPICall(connection, url, method, params, headers, debug)
 
   if(statusCode ~= nil and (tonumber(statusCode) >= 300 or tonumber(statusCode) < 200)) then
     success=false;
-    local cleanResponse=cleanErrorResponse(response);
+    local cleanResponse=cleanErrorResponse(response, debug);
 
     if(cleanResponse == response and tonumber(statusCode) == 100) then
       -- Override for create backup plan that returns 100 regardless (apparently)
@@ -2144,13 +2154,22 @@ function deleteBackups(connection, backupAccessURL, username, password, hostName
     
     -- TODO : would be successful if there were no backups to start with as well, need to confirm what that error code is
     
+    if(tonumber(apiResult.statusCode) == 404) then
+      -- '404' can also result in wcsObjectNotFound which is not valid
+      
+      if(apiResult.response ~= "wcsObjectNotFound") then
+        -- TODO : this could be a valid no backups found to delete
+        --return true, nil;
+      end
+    end
+    
     local syslog = new("syslog");
-      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-      syslog.syslog("LOG_ERR", "Delete backups failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
-      syslog.closelog();
-  
-      success = false;
-      errorResult = apiResult;
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Delete backups failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.closelog();
+
+    success = false;
+    errorResult = apiResult;
   end
 
   return success, errorResult;
@@ -2633,7 +2652,7 @@ function getAllMachines(connection, backupAccessURL, hostName, debug)
   return machines
 end
 
-function cleanErrorResponse(input)
+function cleanErrorResponse(input, debug)
 
   local output=input:gsub("<a.->(.-)</a>","%1");
 
@@ -2650,10 +2669,29 @@ function cleanErrorResponse(input)
 
   if(pcall(function() jsonOutput = new("JSON"):decode(output); end)) then
     if(jsonOutput ~= nil and type(jsonOutput) == "table") then
+    
+      local newOutput = nil;
+      
       local message = jsonOutput.message;
+      local reason = jsonOutput.reason;
+      
       if(message ~= nil) then
-        output = message;
+        newOutput = message;
+      elseif(reason ~= nil) then
+        newOutput = reason;
       end
+      
+      if(newOutput ~= nil) then
+        if(debug) then
+          local syslog = new("syslog");
+          syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+          syslog.syslog("LOG_INFO", "Filtering JSON error response");
+          syslog.syslog("LOG_INFO", tostring(output));
+          syslog.closelog();
+        end
+        output = newOutput;
+      end
+      
     end
   end
 
