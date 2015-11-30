@@ -75,6 +75,8 @@ namespace FCOAcronisWinBackupSetup
 				backupAgent = args [1];
 			}
 
+			bool clean = true;
+
 			bool setup = false;
 			bool install = false;
 			bool register = false;
@@ -114,7 +116,7 @@ namespace FCOAcronisWinBackupSetup
 			Directory.CreateDirectory (tempDirectory);
 
 			string defaultAgentFile = Path.Combine (tempDirectory, "Backup_Client_for_Windows.exe");
-			string msiFile = Path.Combine (tempDirectory, "BackupClient.msi");
+			string msiFile = Path.Combine (tempDirectory, "BackupClient64.msi");
 
 			if (setup && backupAgent == null) {
 
@@ -187,6 +189,10 @@ namespace FCOAcronisWinBackupSetup
 				FileStream msiFileStream = File.Create (msiLog);
 				msiFileStream.Close ();
 
+				if (!File.Exists (msiFile)) {
+					msiFile = Path.Combine (tempDirectory, "BackupClient.msi");
+				}
+
 				string[] formatArgs = new string[register ? 5 : 2];
 				formatArgs [0] = msiFile;
 				formatArgs [1] = msiLog;
@@ -197,21 +203,24 @@ namespace FCOAcronisWinBackupSetup
 				}
 
 				string installArguments = String.Format (
-					                          "/i \"{0}\" " +
-					                          "/qb /l*v \"{1}\" " +
-					                          "REBOOT=ReallySuppress " +
-					                          "ENABLE_COMMON_ERRORS=\"1\" " +
-					                          "ADDLOCAL=\"VssProviderUpgradeInvisible,TrayMonitor,MmsMspComponents,BackupAndRecoveryAgent\" " +
-					                          "ALLUSERS=2 " +
-					                          "CREATE_NEW_ACCOUNT=\"1\" " +
-					                          "ACEP_AGREEMENT=\"0\" " +
-					                          (register ? "RAIN_ADDRESS=\"{2}\" " : "") +
-					                          (register ? "LOGIN_FOR_RAIN=\"{3}\" " : "") +
-					                          (register ? "PASSWORD_FOR_RAIN=\"{4}\" " : "") +
-					                          "MMS_MUST_BE_REGISTERED=0", 
-					                          formatArgs);
+						"/i \"{0}\" " +
+					    "/qb /l*v \"{1}\" " +
+					    "REBOOT=ReallySuppress " +
+						"ENABLE_COMMON_ERRORS=\"1\" " +
+						"ADDLOCAL=\"TrayMonitor,MmsMspComponents,BackupAndRecoveryAgent\" " +
+					    "ALLUSERS=2 " +
+					    "CREATE_NEW_ACCOUNT=\"1\" " +
+					    "ACEP_AGREEMENT=\"0\" " +
+					    (register ? "RAIN_ADDRESS=\"{2}\" " : "") +
+					    (register ? "LOGIN_FOR_RAIN=\"{3}\" " : "") +
+					    (register ? "PASSWORD_FOR_RAIN=\"{4}\" " : "") +
+					    "MMS_MUST_BE_REGISTERED=0" +
+						"CURRENTDIRECTORY=C:\\Users\\Administrator\\Downloads" +
+						"CLIENTUILEVEL=2" +
+						"CLIENTPROCESSID=1060", 
+					    formatArgs);
 
-				invokeCommand ("msiexec", installArguments);
+				clean = invokeCommand ("msiexec", installArguments);
 			} else if (register) {
 
 				Console.WriteLine ("Registering machine with backup service");
@@ -262,8 +271,10 @@ namespace FCOAcronisWinBackupSetup
 
 				Console.WriteLine ("Complete");
 			}
-				
-			Directory.Delete (tempDirectory, true);
+
+			if (clean) {
+				Directory.Delete (tempDirectory, true);
+			}
 			Console.WriteLine ("Complete");
 		}
 
@@ -292,7 +303,7 @@ namespace FCOAcronisWinBackupSetup
 				}
 			}
 
-			String arguments = String.Format ("e {0} -o{1} *.msi", agentFile, tempDirectory);
+			String arguments = String.Format ("e {0} -o{1} *.*", agentFile, tempDirectory);
 			invokeCommand (application, arguments);
 
 			Console.WriteLine ("Complete");
@@ -332,7 +343,7 @@ namespace FCOAcronisWinBackupSetup
 			}
 		}
 
-		private static void invokeCommand(string file, string arguments){
+		private static bool invokeCommand(string file, string arguments){
 			ProcessStartInfo processStartInfo = new ProcessStartInfo (file, arguments);
 			processStartInfo.RedirectStandardOutput = true;
 			processStartInfo.RedirectStandardError = true;
@@ -360,7 +371,10 @@ namespace FCOAcronisWinBackupSetup
 			{
 				Console.WriteLine("The following error was detected:");
 				Console.WriteLine(error);
+				return false;
 			}
+
+			return true;
 		}
 
 		#endregion
