@@ -64,7 +64,7 @@ function acronis_backup_provider()
       "post_server_state_change_trigger",
       "pre_create_server_trigger",
       "pre_modify_server_trigger",
-      "scheduled_trigger" 
+      --"scheduled_trigger" 
     },
     resourceConfigs={
       {
@@ -882,9 +882,7 @@ function scheduled_trigger(p)
       description="A scheduled trigger that will clean up the backups and machines on acronis for deleted servers",
       triggerType="SCHEDULED",
       triggerOptions={"ANY"},
-      -- TODO : add proper  schedule back in
-      schedule={frequency={minutes=5}}
-      --schedule={start={hour=22,minute=0,second=0},frequency={hours=24}}
+      schedule={start={hour=22,minute=0,second=0},frequency={hours=24}}
     }
   end
   
