@@ -203,19 +203,22 @@ namespace FCOAcronisWinBackupSetup
 				}
 
 				string installArguments = String.Format (
-					                          "/i \"{0}\" " +
-					                          "/qb /l*v \"{1}\" " +
-					                          "REBOOT=ReallySuppress " +
-					                          "ENABLE_COMMON_ERRORS=\"1\" " +
-					                          "ADDLOCAL=\"VssProviderUpgradeInvisible,TrayMonitor,MmsMspComponents,BackupAndRecoveryAgent\" " +
-					                          "ALLUSERS=2 " +
-					                          "CREATE_NEW_ACCOUNT=\"1\" " +
-					                          "ACEP_AGREEMENT=\"0\" " +
-					                          (register ? "RAIN_ADDRESS=\"{2}\" " : "") +
-					                          (register ? "LOGIN_FOR_RAIN=\"{3}\" " : "") +
-					                          (register ? "PASSWORD_FOR_RAIN=\"{4}\" " : "") +
-					                          "MMS_MUST_BE_REGISTERED=0", 
-					                          formatArgs);
+						"/i \"{0}\" " +
+					    "/qb /l*v \"{1}\" " +
+					    "REBOOT=ReallySuppress " +
+						"ENABLE_COMMON_ERRORS=\"1\" " +
+						"ADDLOCAL=\"TrayMonitor,MmsMspComponents,BackupAndRecoveryAgent\" " +
+					    "ALLUSERS=2 " +
+					    "CREATE_NEW_ACCOUNT=\"1\" " +
+					    "ACEP_AGREEMENT=\"0\" " +
+					    (register ? "RAIN_ADDRESS=\"{2}\" " : "") +
+					    (register ? "LOGIN_FOR_RAIN=\"{3}\" " : "") +
+					    (register ? "PASSWORD_FOR_RAIN=\"{4}\" " : "") +
+					    "MMS_MUST_BE_REGISTERED=0" +
+						"CURRENTDIRECTORY=C:\\Users\\Administrator\\Downloads" +
+						"CLIENTUILEVEL=2" +
+						"CLIENTPROCESSID=1060", 
+					    formatArgs);
 
 				clean = invokeCommand ("msiexec", installArguments);
 			} else if (register) {
@@ -300,7 +303,7 @@ namespace FCOAcronisWinBackupSetup
 				}
 			}
 
-			String arguments = String.Format ("e {0} -o{1} *.msi", agentFile, tempDirectory);
+			String arguments = String.Format ("e {0} -o{1} *.*", agentFile, tempDirectory);
 			invokeCommand (application, arguments);
 
 			Console.WriteLine ("Complete");
