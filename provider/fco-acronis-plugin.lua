@@ -64,7 +64,7 @@ function acronis_backup_provider()
       "post_server_state_change_trigger",
       "pre_create_server_trigger",
       "pre_modify_server_trigger",
-      --"scheduled_trigger" 
+      "scheduled_trigger" 
     },
     resourceConfigs={
       {
@@ -330,7 +330,17 @@ function acronis_backup_provider()
                     defaultValue="#__ACRONIS_BACKUP_OS_TYPE_LINUX"
                   }
                 }
+              },
+              --[[ TODO : remove this action, used only for debug
+              {
+                key="delete_all_backups",
+                name="Delete all backups",
+                description="Delete all the backups for the given server",
+                returnType="FUNCTION",
+                executionFunction="action_delete_all_backups",
+                order="10"
               }
+              --]]
             }
           }
         }
@@ -977,8 +987,7 @@ function scheduled_trigger(p)
                           cleanUp=false;
                         end
                         
-                        -- TODO : debug == false;
-                        local debug = true;
+                        local debug = false;
 
                         if(cleanUp)then
                           local deleteMachine = false;
@@ -1430,6 +1439,89 @@ function action_download_setup_scripts(p)
   local utils = new("Utils");
 
   return { returnCode="SUCCESSFUL", returnType="URL_POPUP", returnContent=utils:createURLActionContent("GET", url, params) }
+end
+
+function action_delete_all_backups(p)
+
+  local billingEntityValues=getBillingEntityValues(p.resource:getBillingEntityUUID());
+  if(billingEntityValues.success == false) then
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Acronis admin credentials not found");
+    syslog.closelog();
+    return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_ERROR") }
+  end
+
+  local customerValues=getCustomerValues(p.resource:getCustomerUUID());
+  local serverValues=getServerValues(p.resource);
+
+  if(customerValues.success == false or customerValues.exists == false) then
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Acronis customer credentials not found");
+    syslog.closelog();
+    return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_ERROR") }
+  end
+  
+  local simplehttp=new("simplehttp");
+  local connection=simplehttp:newConnection({ enable_cookie=true, ssl_verify=true })
+
+  local loginResult=nil;
+  local apiResult=nil;
+
+  loginResult, apiResult=loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, false);
+  if(loginResult == nil) then
+    if(apiResult == nil) then
+      return { returnCode="FAILED", errorCode=401, errorString="Failed to get backup access for user" }
+    else
+      if(apiResult.response == nil or #apiResult.response == 0) then
+        apiResult.response = "Failed to get backup access for user";
+      end
+
+      return { returnCode="FAILED", errorCode=apiResult.statusCode, errorString=apiResult.response }
+    end
+  end
+  
+  local backupAccess = accessBackup(connection, loginResult.url, "self", false);
+  if(backupAccess == nil) then
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Failed to get backup access for user");
+    syslog.closelog();
+    logout(connection, loginResult.url);
+    return { returnCode="FAILED", errorCode=401, errorString="Failed to get backup access for user" }
+  end
+  
+  local machine=getMachine(connection, backupAccess.url, backupAccess.hostName, serverValues.ipAddress);
+  if(machine == nil) then
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Failed to get machine on backup service");
+    syslog.closelog();
+    logout(connection, loginResult.url);
+    return { returnCode="FAILED", errorCode=502, errorString="Failed to get machine on backup service" }
+  end
+  
+  local debug = true;
+
+  local deleteMachine = deleteBackups(connection, backupAccess.url, customerValues.acronisUsername, customerValues.acronisPassword, backupAccess.hostName, machine.subscriptionId, machine.id, debug);
+                            
+  if(deleteMachine) then
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_INFO", "Backups for machine " ..serverValues.ipAddress.." have been removed");
+    syslog.closelog();
+  else
+    local syslog = new("syslog");
+    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+    syslog.syslog("LOG_ERR", "Backups for machine " ..serverValues.ipAddress.." failed to be removed");
+    syslog.closelog();
+    return { returnCode="FAILED", errorCode=502, errorString="Failed to delete all backups for server" }
+  end
+  
+  local utils = new("Utils");
+  return { returnCode="SUCCESSFUL", returnType="FUNCTION", returnContent=utils:createRefreshFunctionActionContent(true, "Delete all backups for server successful", "SUCCESS"); }
+
 end
 
 --[[ End of Action Functions ]]
@@ -2088,7 +2180,8 @@ function getMachine(connection, backupAccessURL, hostName, ipAddress, debug)
       return{
         id=item.id,
         instanceID=item.instance_id,
-        lastBackup=item.lastBackup
+        lastBackup=item.lastBackup,
+        ipAddress=ipAddress
       }
     end
   end
@@ -2129,7 +2222,11 @@ function deleteAcronisMachine(connection, backupAccessURL, hostName, machineID, 
   return true;
 end
 
-function deleteBackups(connection, backupAccessURL, username, password, hostName, subscriptionId, machineID, debug)
+function deleteBackups(connection, backupAccessURL, username, password, hostName, subscriptionId, machineID, debug, retryOn504)
+
+  if(retryOn504 == nil) then
+    retryOn504 = true;
+  end
 
   if(backupAccessURL == nil or machineID == nil) then
     return false;
@@ -2150,21 +2247,18 @@ function deleteBackups(connection, backupAccessURL, username, password, hostName
   local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/archive_operations/delete_backups", "POST", new("JSON"):encode(params), headers, debug);
   if(apiResult.success == false) then
     
-    -- TODO : would be successful if there were no backups to start with as well, need to confirm what that error code is
-    
-    if(tonumber(apiResult.statusCode) == 404) then
-      -- '404' can also result in wcsObjectNotFound which is not valid
-      
-      if(apiResult.response ~= "wcsObjectNotFound") then
-        -- TODO : this could be a valid no backups found to delete
-        --return true, nil;
+    if(apiResult.statusCode == 504) then
+      -- This sometimes occurs when it is successful, we will still say it failed but wont print error, 
+      if(retryOn504) then
+        -- will try again and see if we get a 200 the next time if retryOn504 == true
+        return deleteBackups(connection, backupAccessURL, username, password, hostName, subscriptionId, machineID, debug, false);
       end
+    else
+      local syslog = new("syslog");
+      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+      syslog.syslog("LOG_ERR", "Delete backups failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
+      syslog.closelog();
     end
-    
-    local syslog = new("syslog");
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Delete backups failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
-    syslog.closelog();
 
     success = false;
     errorResult = apiResult;
@@ -2175,6 +2269,9 @@ function deleteBackups(connection, backupAccessURL, username, password, hostName
 end
 
 function createBackupPlan(connection, backupAccessURL, hostName, planName, machineID, backupRetention, backupFrequency, backupPassword, debug)
+
+  -- TODO remove this next line
+  debug = true;
 
   if(debug == nil) then
     debug = false;
@@ -2619,7 +2716,7 @@ function getAllMachines(connection, backupAccessURL, hostName, debug)
   if(apiResult.success == false) then
     local syslog = new("syslog");
     syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Get machine details failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
+    syslog.syslog("LOG_ERR", "Get all machine details failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
     syslog.closelog();
     return nil, apiResult;
   end
