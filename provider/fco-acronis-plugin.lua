@@ -734,40 +734,7 @@ function pre_server_metadata_update_trigger(p)
     cloudInit = cloudInit .. "runcmd:\n";
     cloudInit = cloudInit .. " - perl /tmp/linux-backup-setup-script.pl all\n";
 
-    local runtimeNode = xmlHelper:findNode(document, "CONFIG/meta/runtime");
-    local systemNode = xmlHelper:findNode(runtimeNode, "system");
-    local userdataNode = nil;
-
-    if(systemNode == nil) then
-      systemNode = xmlHelper:addNode(document, runtimeNode, "system");
-    else
-      userdataNode = xmlHelper:findNode(systemNode, "userdata");
-    end
-
-    local cData = "";
-    local boundary = "runtimemetadataboundary";
-
-    if(userdataNode == nil) then
-      cData = "Content-Type: multipart/mixed; boundary=\""..boundary.."\"\n";
-      cData = cData.."MIME-Version: 1.0\n"
-    else
-      cData = userdataNode:getTextContent()
-      xmlHelper:removeNode(systemNode, userdataNode)
-    end
-
-    cData = cData:gsub( "%-%-"..boundary.."%-%-", " \n")
-
-    cData = cData.."\n--"..boundary.."\n"
-    cData = cData.."Content-Type: text/cloud-config; charset=\"us-ascii\"\n"
-    cData = cData.."MIME-Version: 1.0\n"
-    cData = cData.."Content-Transfer-Encoding: 7bit\n"
-    cData = cData.."Content-Disposition: attachment; filename=\"fco-backup.fake\"\n"
-    cData = cData.."\n"
-
-    cData = cData..cloudInit
-    cData = cData.."--"..boundary.."--\n"
-
-    xmlHelper:addCDataNode(document, systemNode, "userdata", cData)
+    server:addCloudInitData(cloudInit);
 
     return { exitState="SUCCESS" }
   end
