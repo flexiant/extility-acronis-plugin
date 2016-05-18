@@ -38,7 +38,8 @@ namespace FCOAcronisWinBackupSetup
 {
 	class MainClass
 	{
-		private const string AGENT_DOWNLOAD_ADDRESS = "http://dl.managed-protection.com/u/baas/4.0/12.0.1299/Backup_Client_for_Windows_en-US.exe";
+//		private const string AGENT_DOWNLOAD_ADDRESS = "http://dl.managed-protection.com/u/baas/4.0/12.0.1299/Backup_Client_for_Windows_en-US.exe";
+		private const string AGENT_DOWNLOAD_ADDRESS = "http://dl.managed-protection.com/u/baas/4.0/12.0.3034/Backup_Agent_for_Windows_x64.exe";
 
 		#region Enum.
 

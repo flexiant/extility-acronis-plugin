@@ -64,7 +64,7 @@ function acronis_backup_provider()
       "post_server_state_change_trigger",
       "pre_create_server_trigger",
       "pre_modify_server_trigger",
-      "scheduled_trigger" 
+      --"scheduled_trigger" 
     },
     resourceConfigs={
       {
@@ -158,7 +158,16 @@ function acronis_backup_provider()
                     }
                   }
                 }
-              }
+              },
+              --TODO : remove this action, used only for debug
+              --[[{
+                key="force_cleanup",
+                name="Force cleanup",
+                description="Force the cleanup script to run.",
+                returnType="FUNCTION",
+                executionFunction="force_cleanup_script",
+                order="10"
+              }--]]
             }
           }
         }
@@ -330,17 +339,7 @@ function acronis_backup_provider()
                     defaultValue="#__ACRONIS_BACKUP_OS_TYPE_LINUX"
                   }
                 }
-              },
-              --[[ TODO : remove this action, used only for debug
-              {
-                key="delete_all_backups",
-                name="Delete all backups",
-                description="Delete all the backups for the given server",
-                returnType="FUNCTION",
-                executionFunction="action_delete_all_backups",
-                order="10"
               }
-              --]]
             }
           }
         }
@@ -954,7 +953,8 @@ function scheduled_trigger(p)
                           cleanUp=false;
                         end
                         
-                        local debug = false;
+                        -- TODO : change back to false.
+                        local debug = true;
 
                         if(cleanUp)then
                           local deleteMachine = false;
@@ -1408,87 +1408,29 @@ function action_download_setup_scripts(p)
   return { returnCode="SUCCESSFUL", returnType="URL_POPUP", returnContent=utils:createURLActionContent("GET", url, params) }
 end
 
-function action_delete_all_backups(p)
-
-  local billingEntityValues=getBillingEntityValues(p.resource:getBillingEntityUUID());
-  if(billingEntityValues.success == false) then
-    local syslog = new("syslog");
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Acronis admin credentials not found");
-    syslog.closelog();
-    return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_ERROR") }
-  end
-
-  local customerValues=getCustomerValues(p.resource:getCustomerUUID());
-  local serverValues=getServerValues(p.resource);
-
-  if(customerValues.success == false or customerValues.exists == false) then
-    local syslog = new("syslog");
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Acronis customer credentials not found");
-    syslog.closelog();
-    return { returnCode="FAILED", errorCode=401, errorString=translate.string("#__ACRONIS_BACKUP_PCT_CUSTOMER_SETTINGS_ACTION_DISPLAY_DETAILS_ERROR") }
-  end
+--[[
+  This is a hacky temp action to test the cleanup script easily
   
-  local simplehttp=new("simplehttp");
-  local connection=simplehttp:newConnection({ enable_cookie=true, ssl_verify=true })
-
-  local loginResult=nil;
-  local apiResult=nil;
-
-  loginResult, apiResult=loginToAcronis(connection, billingEntityValues.serviceURL, customerValues.acronisUsername, customerValues.acronisPassword, false);
-  if(loginResult == nil) then
-    if(apiResult == nil) then
-      return { returnCode="FAILED", errorCode=401, errorString="Failed to get backup access for user" }
-    else
-      if(apiResult.response == nil or #apiResult.response == 0) then
-        apiResult.response = "Failed to get backup access for user";
-      end
-
-      return { returnCode="FAILED", errorCode=apiResult.statusCode, errorString=apiResult.response }
-    end
-  end
+  IT IS NEVER TO BE USED AS AN EXAMPLE OF PROPPER ACTIONS AND SHOULD NOT BE ACCESSIBLE IN LIVE CODE
+--]]
+function force_cleanup_script(p)
+  -- make sure p has everything it needs to invoke the cleanup script.
   
-  local backupAccess = accessBackup(connection, loginResult.url, "self", false);
-  if(backupAccess == nil) then
-    local syslog = new("syslog");
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Failed to get backup access for user");
-    syslog.closelog();
-    logout(connection, loginResult.url);
-    return { returnCode="FAILED", errorCode=401, errorString="Failed to get backup access for user" }
-  end
+  local dateHelper = new("FDLDateHelper");
   
-  local machine=getMachine(connection, backupAccess.url, backupAccess.hostName, serverValues.ipAddress);
-  if(machine == nil) then
-    local syslog = new("syslog");
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Failed to get machine on backup service");
-    syslog.closelog();
-    logout(connection, loginResult.url);
-    return { returnCode="FAILED", errorCode=502, errorString="Failed to get machine on backup service" }
-  end
+  p = {};
+  p.input = {};
+  p.input[1] = dateHelper:getTimestamp();
+  p.input[2] = 24 * 60 * 60 * 1000;
+  p.input[3] = dateHelper:addDays(dateHelper:getTimestamp(), 1); -- This will fake it always being 24+ hours after last backup.
   
-  local debug = true;
-
-  local deleteMachine = deleteBackups(connection, backupAccess.url, customerValues.acronisUsername, customerValues.acronisPassword, backupAccess.hostName, machine.subscriptionId, machine.id, debug);
-                            
-  if(deleteMachine) then
-    local syslog = new("syslog");
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_INFO", "Backups for machine " ..serverValues.ipAddress.." have been removed");
-    syslog.closelog();
-  else
-    local syslog = new("syslog");
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Backups for machine " ..serverValues.ipAddress.." failed to be removed");
-    syslog.closelog();
-    return { returnCode="FAILED", errorCode=502, errorString="Failed to delete all backups for server" }
-  end
+  local triggerResult = scheduled_trigger(p);
   
-  local utils = new("Utils");
-  return { returnCode="SUCCESSFUL", returnType="FUNCTION", returnContent=utils:createRefreshFunctionActionContent(true, "Delete all backups for server successful", "SUCCESS"); }
-
+  return { 
+    returnCode="SUCCESSFUL", 
+    returnType="FUNCTION", 
+    returnContent=new("Utils"):createRefreshFunctionActionContent(true, "cleanup successful", "SUCCESS"); 
+  }
 end
 
 --[[ End of Action Functions ]]
@@ -2125,13 +2067,16 @@ function getMachine(connection, backupAccessURL, hostName, ipAddress, debug)
   end
   local response=json:decode(apiResult.response);
 
-  apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/" .. hostName .. "/resources?subscriptionId=" .. response.id .. "&recursive=5", "GET", "", headers, debug);
+  apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/resources?subscriptionId=" .. response.id .. "&recursive=5", "GET", "", headers, debug);
   if(apiResult.success == false) then
-    local syslog = new("syslog");
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Get machine details failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
-    syslog.closelog();
-    return nil, apiResult;
+    local altApiResult=makeAPICall(connection, backupAccessURL.."/api/ams/" .. hostName .. "/resources?subscriptionId=" .. response.id .. "&recursive=5", "GET", "", headers, debug);
+    if(altApiResult.success == false) then
+      local syslog = new("syslog");
+      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+      syslog.syslog("LOG_ERR", "Get machine details failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
+      syslog.closelog();
+      return nil, apiResult;
+    end
   end
   response=json:decode(apiResult.response);
 
@@ -2237,9 +2182,6 @@ end
 
 function createBackupPlan(connection, backupAccessURL, hostName, planName, machineID, backupRetention, backupFrequency, backupPassword, debug)
 
-  -- TODO remove this next line
-  debug = true;
-
   if(debug == nil) then
     debug = false;
   end
@@ -2273,7 +2215,7 @@ function createBackupPlan(connection, backupAccessURL, hostName, planName, machi
 
   local actionString = "createAndRun";
   if(debug) then
-    actionString = "create";
+    --actionString = "create";
   end
 
   local apiParams={
@@ -2442,13 +2384,16 @@ function deleteBackupPlan(connection, backupAccessURL, hostName, backupPlanID, d
   headers['Content-Type']="application/json; charset=UTF-8";
   headers['Accept']="application/json";
 
-  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..hostName.."/bplans/"..backupPlanID, "DELETE", "", headers, debug);
+  local apiResult=makeAPICall(connection, backupAccessURL.."/api/ams/backup/plans/"..backupPlanID, "DELETE", "", headers, debug);
   if(apiResult.success == false) then
-    local syslog = new("syslog");
-    syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
-    syslog.syslog("LOG_ERR", "Delete backup plan failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
-    syslog.closelog();
-    return false, apiResult;
+    local altApiResult=makeAPICall(connection, backupAccessURL.."/api/ams/"..hostName.."/bplans/"..backupPlanID, "DELETE", "", headers, debug);
+    if(altApiResult.success == false) then
+      local syslog = new("syslog");
+      syslog.openlog("ACRONIS_BACKUP", syslog.LOG_ODELAY + syslog.LOG_PID);
+      syslog.syslog("LOG_ERR", "Delete backup plan failed : " .. apiResult.statusCode .. " : " .. apiResult.response);
+      syslog.closelog();
+      return false, apiResult;
+    end
   end
 
   return true;
@@ -2498,6 +2443,11 @@ function getBackupPlanID(connection, backupAccessURL, hostName, machineID, debug
 end
 
 function getAcronisStorageUsage(acronisURL, username, password, machineInstanceID, debug)
+
+  if(debug == nil) then
+    debug = false;
+  end
+
   local json=new("JSON")
 
   local def={ enable_cookie=true, ssl_verify=true }

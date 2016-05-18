@@ -26,8 +26,8 @@
 use strict;
 use warnings;
 
-my $agentVersion = "12.0.1299";
-my $agentDownloadAddress = "http://dl.managed-protection.com/u/baas/4.0/12.0.1299/Backup_Agent_for_Linux_en-US_x86_64.bin";
+my $agentVersion = "12.0.3034";
+my $agentDownloadAddress = "http://dl.managed-protection.com/u/baas/4.0/12.0.3034/Backup_Agent_for_Linux_x86_64.bin";
 my $acronisVersionFile = "/var/spool/fco-acronis/version";
 
 my $acronisURL;
@@ -100,7 +100,7 @@ if($action eq "all"){
 }elsif($action eq "check"){
 	$check = 1;
 }else{
-	print STDERR "No action argument found, expecting all, full-install, install, register, or details\n";
+	print STDERR "No action argument found, expecting all, full-install, install, register, check, or details\n";
 	exit;
 }
 
@@ -139,7 +139,7 @@ if($setup){
 		# Here we can install any new packages that are needed for the upgraded agent
 		# Version 11.9.215 - Original agent version
 		# Version 12.0.1299 - No new packages required.
-		
+		# Version 12.0.3034 - No new packages required.
 	}
 	
 	if(not defined($agent)){
